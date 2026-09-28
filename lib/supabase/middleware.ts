@@ -1,5 +1,11 @@
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+
+interface CookieToSet {
+  name: string;
+  value: string;
+  options: CookieOptions;
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -12,7 +18,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieToSet[]) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -25,10 +31,10 @@ export async function updateSession(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isAuthPage = request.nextUrl.pathname.startsWith('/login') ||
-                     request.nextUrl.pathname.startsWith('/register');
-  const isPendingPage = request.nextUrl.pathname === '/pending';
-  const isPublicRoute = isAuthPage || request.nextUrl.pathname.startsWith('/api/');
+  const pathname = request.nextUrl.pathname;
+  const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
+  const isPendingPage = pathname === '/pending';
+  const isPublicRoute = isAuthPage || pathname.startsWith('/api/');
 
   if (!user && !isPublicRoute && !isPendingPage) {
     const url = request.nextUrl.clone();
