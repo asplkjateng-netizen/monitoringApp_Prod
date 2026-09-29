@@ -8,7 +8,6 @@ import {
   Plus, 
   Calendar, 
   CheckCircle2, 
-  Clock, 
   AlertCircle, 
   ExternalLink 
 } from 'lucide-react';
@@ -22,6 +21,7 @@ interface TaskItem {
   priority: 'TINGGI' | 'SEDANG' | 'RENDAH';
   progress_pct: number;
   evidence_link?: string;
+  period_type?: string;
   period_month?: number;
   period_year: number;
   created_at: string;
@@ -30,6 +30,7 @@ interface TaskItem {
 function TasksContent() {
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get('status') || 'ALL';
+  const periodParam = searchParams.get('period') || 'CURRENT_MONTH';
 
   const supabase = createClient();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -83,23 +84,54 @@ function TasksContent() {
     return Math.round((dDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
 
-  // Helper Warna Progress Bar: 0-30% Merah, 31-79% Kuning, >= 80% Hijau
   const getProgressBarColor = (pct: number) => {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 31) return 'bg-amber-400';
     return 'bg-rose-500';
   };
 
+  // Filter Tasks berdasarkan Search, Status Tab, dan Siklus Periode dari Topbar
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = t.title.toLowerCase().includes(search.toLowerCase());
     if (!matchesSearch) return false;
 
-    if (statusFilter === 'ALL') return true;
-    if (statusFilter === 'KRITIS') {
-      const diffDays = getDaysDiff(t.deadline);
-      return t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && diffDays <= 3);
+    // Filter Status
+    if (statusFilter !== 'ALL') {
+      if (statusFilter === 'KRITIS') {
+        const diffDays = getDaysDiff(t.deadline);
+        const isKritis = t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && diffDays <= 3);
+        if (!isKritis) return false;
+      } else if (t.status !== statusFilter) {
+        return false;
+      }
     }
-    return t.status === statusFilter;
+
+    // Filter Siklus Periode (Sinkronisasi dengan Topbar)
+    const taskDate = new Date(t.deadline);
+    const taskMonth = t.period_month || (taskDate.getMonth() + 1);
+    const currentMonth = new Date().getMonth() + 1;
+
+    switch (periodParam) {
+      case 'CURRENT_MONTH':
+        return taskMonth === currentMonth;
+      case 'TW_1':
+        return [1, 2, 3].includes(taskMonth);
+      case 'TW_2':
+        return [4, 5, 6].includes(taskMonth);
+      case 'TW_3':
+        return [7, 8, 9].includes(taskMonth);
+      case 'TW_4':
+        return [10, 11, 12].includes(taskMonth);
+      case 'SEMESTER_1':
+        return [1, 2, 3, 4, 5, 6].includes(taskMonth);
+      case 'SEMESTER_2':
+        return [7, 8, 9, 10, 11, 12].includes(taskMonth);
+      case 'TAHUNAN':
+        return t.period_type === 'TAHUNAN';
+      case 'ALL':
+      default:
+        return true;
+    }
   });
 
   const getUrgencyBadge = (task: TaskItem) => {
@@ -161,7 +193,7 @@ function TasksContent() {
         </div>
         <Link
           href="/tasks/new"
-          className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-4 py-2.5 rounded-2xl font-medium text-sm transition-colors shadow-sm"
+          className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-5 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" /> Rekam Tugas Baru
         </Link>
@@ -208,8 +240,8 @@ function TasksContent() {
           <div className="py-20 text-center text-sm text-stone-400">Memuat daftar tugas...</div>
         ) : filteredTasks.length === 0 ? (
           <div className="py-20 text-center">
-            <p className="text-stone-500 font-medium text-sm">Tidak ada tugas ditemukan</p>
-            <p className="text-stone-400 text-xs mt-1">Coba sesuaikan kata kunci pencarian atau filter status.</p>
+            <p className="text-stone-500 font-medium text-sm">Tidak ada tugas ditemukan pada periode ini</p>
+            <p className="text-stone-400 text-xs mt-1">Coba ganti filter periode di atas atau ubah status tugas.</p>
           </div>
         ) : (
           <div className="divide-y divide-stone-100">
@@ -232,7 +264,6 @@ function TasksContent() {
                   </div>
                   <h3 className="font-semibold text-stone-900 text-base">{task.title}</h3>
                   
-                  {/* Progress Bar Dinamis: Merah -> Kuning -> Hijau */}
                   <div className="flex items-center gap-3 pt-1 max-w-xs">
                     <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
                       <div 
