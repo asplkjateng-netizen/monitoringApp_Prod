@@ -12,7 +12,8 @@ import {
   CheckCircle2, 
   FileText, 
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  BookmarkPlus
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -44,19 +45,25 @@ export default function NewTaskPage() {
   // Identitas sesi & unit
   const [userId, setUserId] = useState<string | null>(null);
   const [unitId, setUnitId] = useState<string | null>(null);
+  const [userTusiType, setUserTusiType] = useState<string>('UMUM');
 
   // Sumber data pendukung
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
 
-  // State Form
+  // State Form Pokok
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
   const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('BULANAN');
   const [periodMonth, setPeriodMonth] = useState<number>(new Date().getMonth() + 1);
   const [periodYear, setPeriodYear] = useState<number>(new Date().getFullYear());
+  
+  // Pengaturan Deadline Klerikal vs Insidentil
+  const [cutoffDay, setCutoffDay] = useState<number>(15);
+  const [cutoffTiming, setCutoffTiming] = useState<'SAME_MONTH' | 'NEXT_MONTH'>('NEXT_MONTH');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState<'TINGGI' | 'SEDANG' | 'RENDAH'>('SEDANG');
 
@@ -67,6 +74,34 @@ export default function NewTaskPage() {
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  // Hitung otomatis deadline saat tipe periode / cut-off berubah
+  useEffect(() => {
+    if (periodType !== 'INSIDENTIL') {
+      calculateClericalDeadline();
+    }
+  }, [periodType, periodMonth, periodYear, cutoffDay, cutoffTiming]);
+
+  const calculateClericalDeadline = () => {
+    let targetYear = periodYear;
+    let targetMonth = periodMonth; // 1-12
+
+    if (cutoffTiming === 'NEXT_MONTH') {
+      targetMonth += 1;
+      if (targetMonth > 12) {
+        targetMonth = 1;
+        targetYear += 1;
+      }
+    }
+
+    // Pastikan tanggal valid di bulan tersebut
+    const daysInTargetMonth = new Date(targetYear, targetMonth, 0).getDate();
+    const effectiveDay = Math.min(cutoffDay, daysInTargetMonth);
+
+    const formattedMonth = String(targetMonth).padStart(2, '0');
+    const formattedDay = String(effectiveDay).padStart(2, '0');
+    setDeadline(`${targetYear}-${formattedMonth}-${formattedDay}`);
+  };
 
   const fetchInitialData = async () => {
     setLoading(true);
@@ -79,17 +114,19 @@ export default function NewTaskPage() {
 
     setUserId(user.id);
 
-    // 1. Ambil profil user & unit_id
+    // Ambil profil user, unit_id, dan tusi_type
     const { data: profile } = await supabase
       .from('profiles')
-      .select('unit_id')
+      .select('unit_id, unit:units(id, tusi_type)')
       .eq('id', user.id)
       .single();
 
     if (profile?.unit_id) {
       setUnitId(profile.unit_id);
+      const tusi = (profile.unit as any)?.tusi_type || 'UMUM';
+      setUserTusiType(tusi);
 
-      // 2. Ambil staf aktif di unit yang sama untuk Multi-PIC
+      // Ambil staf aktif
       const { data: staff } = await supabase
         .from('profiles')
         .select('id, full_name, nip, role')
@@ -99,11 +136,10 @@ export default function NewTaskPage() {
 
       if (staff) {
         setStaffList(staff);
-        // Default: jadikan pembuat tugas sebagai salah satu PIC terpilih
         setSelectedPics([user.id]);
       }
 
-      // 3. Ambil Master Template Bank Tusi
+      // Ambil Master Template Bank Tusi
       const { data: tpl } = await supabase
         .from('task_templates')
         .select('id, title, description, legal_basis, period_type')
@@ -115,7 +151,6 @@ export default function NewTaskPage() {
     setLoading(false);
   };
 
-  // Handler auto-fill jika memilih template
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (!templateId) return;
@@ -129,18 +164,14 @@ export default function NewTaskPage() {
     }
   };
 
-  // Toggle PIC
   const togglePic = (picId: string) => {
     setSelectedPics((prev) =>
       prev.includes(picId) ? prev.filter((id) => id !== picId) : [...prev, picId]
     );
   };
 
-  // Subtask Handlers
-  const handleAddSubtask = () => {
-    setSubtasks((prev) => [...prev, '']);
-  };
-
+  const handleAddSubtask = () => setSubtasks((prev) => [...prev, '']);
+  const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
   const handleSubtaskChange = (index: number, value: string) => {
     setSubtasks((prev) => {
       const updated = [...prev];
@@ -149,11 +180,6 @@ export default function NewTaskPage() {
     });
   };
 
-  const handleRemoveSubtask = (index: number) => {
-    setSubtasks((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
@@ -162,12 +188,10 @@ export default function NewTaskPage() {
       setErrorMessage('Sesi kerja tidak valid. Harap muat ulang halaman.');
       return;
     }
-
     if (!title.trim()) {
       setErrorMessage('Judul tugas wajib diisi.');
       return;
     }
-
     if (!deadline) {
       setErrorMessage('Tenggat waktu (deadline) wajib ditentukan.');
       return;
@@ -176,12 +200,36 @@ export default function NewTaskPage() {
     setSubmitting(true);
 
     try {
-      // 1. Simpan Task Utama
+      let createdTemplateId = selectedTemplateId || null;
+
+      // 1. Simpan ke Bank Template jika opsi dicentang
+      if (saveAsTemplate) {
+        const { data: newTpl, error: tplError } = await supabase
+          .from('task_templates')
+          .insert({
+            tusi_type: userTusiType,
+            title: title.trim(),
+            description: description.trim() || null,
+            legal_basis: legalBasis.trim() || null,
+            period_type: periodType,
+            created_by_unit: unitId
+          })
+          .select('id')
+          .single();
+
+        if (tplError) {
+          console.warn('Gagal menyimpan template master:', tplError.message);
+        } else if (newTpl) {
+          createdTemplateId = newTpl.id;
+        }
+      }
+
+      // 2. Simpan Task Utama
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
           unit_id: unitId,
-          template_id: selectedTemplateId || null,
+          template_id: createdTemplateId,
           title: title.trim(),
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
@@ -203,25 +251,17 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 2. Simpan Multi-PIC jika ada yang dipilih
+      // 3. Simpan Multi-PIC
       if (selectedPics.length > 0) {
         const picPayloads = selectedPics.map((picUserId) => ({
           task_id: taskId,
           user_id: picUserId,
         }));
-
-        const { error: picError } = await supabase
-          .from('task_pics')
-          .insert(picPayloads);
-
-        if (picError) console.error('Error saat menyimpan PIC:', picError);
+        await supabase.from('task_pics').insert(picPayloads);
       }
 
-      // 3. Simpan Subtasks jika ada yang diisi
-      const validSubtasks = subtasks
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
+      // 4. Simpan Subtasks jika ada
+      const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
           task_id: taskId,
@@ -234,10 +274,11 @@ export default function NewTaskPage() {
           .from('subtasks')
           .insert(subtaskPayloads);
 
-        if (subtaskError) console.error('Error saat menyimpan sub-tugas:', subtaskError);
+        if (subtaskError) {
+          console.error('Error saat menyimpan subtasks:', subtaskError);
+        }
       }
 
-      // Sukses -> alihkan ke daftar tugas
       router.push('/tasks');
       router.refresh();
     } catch (err: any) {
@@ -247,16 +288,11 @@ export default function NewTaskPage() {
   };
 
   if (loading) {
-    return (
-      <div className="p-8 text-center text-sm text-stone-500">
-        Menyiapkan formulir rekam tugas...
-      </div>
-    );
+    return <div className="p-8 text-center text-sm text-stone-500">Menyiapkan formulir rekam tugas...</div>;
   }
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-4xl mx-auto">
-      {/* Header & Tombol Kembali */}
       <div className="flex items-center gap-3">
         <Link
           href="/tasks"
@@ -267,7 +303,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan realisasi tugas unit kerja, tentukan Multi-PIC, dan susun tahapan sub-pekerjaan.
+            Daftarkan realisasi tugas unit kerja, tentukan batas tenggat, Multi-PIC, dan tahapan sub-pekerjaan.
           </p>
         </div>
       </div>
@@ -280,128 +316,167 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Card 1: Import dari Katalog Tusi (Opsional) */}
-        {templates.length > 0 && (
-          <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
-            <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
-              <Sparkles className="w-4 h-4 text-[#DF3B68]" />
-              <span>Gunakan Master Template Bank Tusi (Opsional)</span>
-            </div>
-            <p className="text-xs text-stone-500">
-              Pilih template untuk mengisi otomatis uraian tugas, dasar hukum, dan tipe periode.
-            </p>
-            <select
-              value={selectedTemplateId}
-              onChange={(e) => handleSelectTemplate(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-stone-50/50 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
-            >
-              <option value="">-- Buat Tugas Mandiri (Tanpa Template) --</option>
-              {templates.map((tpl) => (
-                <option key={tpl.id} value={tpl.id}>
-                  {tpl.title} ({tpl.period_type})
-                </option>
-              ))}
-            </select>
+        {/* Card 1: Import dari Katalog Tusi */}
+        <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
+            <Sparkles className="w-4 h-4 text-[#DF3B68]" />
+            <span>Gunakan Master Template Bank Tusi (Opsional)</span>
           </div>
-        )}
+          <select
+            value={selectedTemplateId}
+            onChange={(e) => handleSelectTemplate(e.target.value)}
+            className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-stone-50/50 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+          >
+            <option value="">-- Buat Tugas Mandiri (Tanpa Template) --</option>
+            {templates.map((tpl) => (
+              <option key={tpl.id} value={tpl.id}>
+                {tpl.title} ({tpl.period_type})
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {/* Card 2: Informasi Pokok Pekerjaan */}
+        {/* Card 2: Informasi Pokok Pekerjaan & Deadline Klerikal */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
-          <div className="flex items-center gap-2 text-stone-800 font-bold text-sm border-b border-stone-100 pb-3">
-            <FileText className="w-4 h-4 text-[#DF3B68]" />
-            <span>Rincian Informasi Tugas</span>
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+            <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+              <FileText className="w-4 h-4 text-[#DF3B68]" />
+              <span>Rincian Informasi Tugas</span>
+            </div>
+            {/* Checkbox Simpan ke Bank Template */}
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl transition-colors">
+              <input
+                type="checkbox"
+                checked={saveAsTemplate}
+                onChange={(e) => setSaveAsTemplate(e.target.checked)}
+                className="w-3.5 h-3.5 rounded text-[#DF3B68] focus:ring-[#DF3B68]"
+              />
+              <BookmarkPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
+              <span>Simpan ke Bank Template Tusi</span>
+            </label>
           </div>
 
           <div className="space-y-4">
             <Input
               label="Judul / Uraian Tugas *"
-              placeholder="Contoh: Penyusunan Laporan Kepatuhan Internal Semester I"
+              placeholder="Contoh: Rekonsiliasi Laporan Keuangan dan LPJ Bendahara"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
             />
 
-            <div className="w-full space-y-1 text-left">
+            <div className="space-y-1 text-left">
               <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Peraturan</label>
               <input
                 type="text"
-                placeholder="Contoh: PER-12/PB/2023, Nota Dinas Direktur SMI"
+                placeholder="Contoh: PER-56/PB/2016, Nota Dinas Terkait"
                 value={legalBasis}
                 onChange={(e) => setLegalBasis(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
               />
             </div>
 
-            <div className="w-full space-y-1 text-left">
+            <div className="space-y-1 text-left">
               <label className="block text-xs font-semibold text-stone-600">Deskripsi / Petunjuk Teknis</label>
               <textarea
                 rows={3}
-                placeholder="Jelaskan output dokumen dan tata kelola tugas ini secara ringkas..."
+                placeholder="Rincian output tugas..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68] resize-none"
+                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 resize-none"
               />
             </div>
           </div>
 
-          {/* Grid Periode & Deadline */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1">Tipe Periode</label>
-              <select
-                value={periodType}
-                onChange={(e) => setPeriodType(e.target.value as any)}
-                className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
-              >
-                <option value="BULANAN">Bulanan</option>
-                <option value="TRIWULANAN">Triwulanan</option>
-                <option value="SEMESTERAN">Semesteran</option>
-                <option value="TAHUNAN">Tahunan</option>
-                <option value="INSIDENTIL">Insidentil</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1">Periode Bulan & Tahun</label>
-              <div className="flex gap-2">
+          {/* Konfigurasi Siklus Periode & Deadline Klerikal */}
+          <div className="bg-stone-50/70 p-4 rounded-2xl border border-stone-100 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-stone-600 mb-1">Tipe Periode</label>
                 <select
-                  value={periodMonth}
-                  onChange={(e) => setPeriodMonth(Number(e.target.value))}
-                  className="w-1/2 px-2 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  value={periodType}
+                  onChange={(e) => setPeriodType(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:ring-2 focus:ring-[#DF3B68]/20"
                 >
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>
-                      Bulan {i + 1}
-                    </option>
-                  ))}
+                  <option value="BULANAN">Bulanan</option>
+                  <option value="TRIWULANAN">Triwulanan</option>
+                  <option value="SEMESTERAN">Semesteran</option>
+                  <option value="TAHUNAN">Tahunan</option>
+                  <option value="INSIDENTIL">Insidentil (Bebas)</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-600 mb-1">Periode Bulan & Tahun</label>
+                <div className="flex gap-2">
+                  <select
+                    value={periodMonth}
+                    onChange={(e) => setPeriodMonth(Number(e.target.value))}
+                    className="w-1/2 px-2 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>Bulan {i + 1}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={periodYear}
+                    onChange={(e) => setPeriodYear(Number(e.target.value))}
+                    className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800"
+                  />
+                </div>
+              </div>
+
+              {/* Deadline Logic */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-600 mb-1">
+                  {periodType === 'INSIDENTIL' ? 'Tenggat Waktu *' : 'Tenggat Waktu Terkalkulasi'}
+                </label>
                 <input
-                  type="number"
-                  value={periodYear}
-                  onChange={(e) => setPeriodYear(Number(e.target.value))}
-                  className="w-1/2 px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  type="date"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1">Tenggat Waktu (Deadline) *</label>
-              <input
-                type="date"
-                value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
-                required
-                className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
-              />
-            </div>
+            {/* Aturan Khusus Klerikal (Bulanan, Triwulanan, Semesteran, Tahunan) */}
+            {periodType !== 'INSIDENTIL' && (
+              <div className="pt-2 border-t border-stone-200/60 flex flex-wrap items-center gap-3 text-xs text-stone-600">
+                <span className="font-semibold text-stone-700">Aturan Siklus: Batas Tanggal</span>
+                <select
+                  value={cutoffDay}
+                  onChange={(e) => setCutoffDay(Number(e.target.value))}
+                  className="px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium"
+                >
+                  {[5, 10, 15, 20, 25, 31].map((d) => (
+                    <option key={d} value={d}>Tanggal {d === 31 ? 'Akhir Bulan' : d}</option>
+                  ))}
+                </select>
+                <span>pada</span>
+                <select
+                  value={cutoffTiming}
+                  onChange={(e) => setCutoffTiming(e.target.value as any)}
+                  className="px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium"
+                >
+                  <option value="NEXT_MONTH">Bulan Berikutnya (M+1)</option>
+                  <option value="SAME_MONTH">Bulan Berjalan</option>
+                </select>
+                <span className="text-stone-400 text-[11px] italic">
+                  (Otomatis menghitung tanggal tenggat: {deadline})
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Prioritas Tugas */}
+          {/* Prioritas */}
           <div>
             <label className="block text-xs font-semibold text-stone-600 mb-2">Tingkat Prioritas</label>
             <div className="flex gap-3">
               {[
-                { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-100 peer-checked:text-stone-800 peer-checked:border-stone-300' },
+                { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-100 peer-checked:text-stone-800' },
                 { id: 'SEDANG', label: 'Sedang', style: 'peer-checked:bg-amber-50 peer-checked:text-amber-800 peer-checked:border-amber-300' },
                 { id: 'TINGGI', label: 'Tinggi', style: 'peer-checked:bg-rose-50 peer-checked:text-rose-800 peer-checked:border-rose-300' },
               ].map((p) => (
@@ -414,7 +489,7 @@ export default function NewTaskPage() {
                     onChange={() => setPriority(p.id as any)}
                     className="peer sr-only"
                   />
-                  <div className={`p-2.5 text-center text-xs font-semibold rounded-xl border border-stone-200 text-stone-500 transition-all ${p.style}`}>
+                  <div className={`p-2 text-center text-xs font-semibold rounded-xl border border-stone-200 text-stone-500 transition-all ${p.style}`}>
                     {p.label}
                   </div>
                 </label>
@@ -423,23 +498,17 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* Card 3: Multi-PIC Pegawai */}
+        {/* Card 3: Multi-PIC */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
               <Users className="w-4 h-4 text-[#DF3B68]" />
               <span>Tetapkan PIC Pelaksana (Multi-PIC)</span>
             </div>
-            <span className="text-[11px] text-stone-400 font-medium">
-              {selectedPics.length} pegawai dipilih
-            </span>
+            <span className="text-[11px] text-stone-400 font-medium">{selectedPics.length} pegawai dipilih</span>
           </div>
 
-          <p className="text-xs text-stone-500">
-            Pilih satu atau beberapa pegawai dari seksi/unit kerja Anda yang bertanggung jawab atas tugas ini:
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-1">
             {staffList.map((staff) => {
               const isChecked = selectedPics.includes(staff.id);
               return (
@@ -448,7 +517,7 @@ export default function NewTaskPage() {
                   onClick={() => togglePic(staff.id)}
                   className={`p-3 rounded-2xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
                     isChecked
-                      ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900 shadow-xs'
+                      ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900'
                       : 'border-stone-200/80 bg-white text-stone-600 hover:bg-stone-50'
                   }`}
                 >
@@ -456,13 +525,7 @@ export default function NewTaskPage() {
                     <p className="font-semibold truncate">{staff.full_name}</p>
                     <p className="text-[10px] text-stone-400">NIP. {staff.nip} • {staff.role}</p>
                   </div>
-                  <div
-                    className={`w-4 h-4 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
-                      isChecked
-                        ? 'bg-[#DF3B68] border-[#DF3B68] text-white'
-                        : 'border-stone-300 bg-white'
-                    }`}
-                  >
+                  <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300'}`}>
                     {isChecked && <CheckCircle2 className="w-3 h-3" />}
                   </div>
                 </div>
@@ -471,7 +534,7 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* Card 4: Sub-Pekerjaan Checklist Dinamis */}
+        {/* Card 4: Sub-Pekerjaan Awal */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -481,16 +544,11 @@ export default function NewTaskPage() {
             <button
               type="button"
               onClick={handleAddSubtask}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#DF3B68] hover:text-[#C72F58] transition-colors"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#DF3B68] hover:text-[#C72F58]"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Tambah Tahapan
+              <Plus className="w-3.5 h-3.5" /> Tambah Tahapan
             </button>
           </div>
-
-          <p className="text-xs text-stone-500">
-            Rincikan tahapan eksekusi. Progres persentase tugas utama akan otomatis terhitung dari checklist sub-tugas ini.
-          </p>
 
           <div className="space-y-2.5">
             {subtasks.map((st, idx) => (
@@ -501,13 +559,13 @@ export default function NewTaskPage() {
                   placeholder={`Uraian sub-tahapan ke-${idx + 1}`}
                   value={st}
                   onChange={(e) => handleSubtaskChange(idx, e.target.value)}
-                  className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+                  className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
                 {subtasks.length > 1 && (
                   <button
                     type="button"
                     onClick={() => handleRemoveSubtask(idx)}
-                    className="p-2 text-stone-400 hover:text-rose-500 transition-colors rounded-lg hover:bg-rose-50"
+                    className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -521,7 +579,7 @@ export default function NewTaskPage() {
         <div className="flex items-center justify-end gap-3 pt-2">
           <Link
             href="/tasks"
-            className="px-5 py-2.5 rounded-full border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-medium transition-colors"
+            className="px-5 py-2.5 rounded-full border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-medium"
           >
             Batal
           </Link>
