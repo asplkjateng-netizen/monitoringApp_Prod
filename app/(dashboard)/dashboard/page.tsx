@@ -282,4 +282,43 @@ export default function DashboardPage() {
           onClick={() => router.push('/tasks')}
         />
         <MetricCard 
-          label="Terkendala / Kr
+          label="Terkendala / Kritis" 
+          value={loading ? '...' : metrics.critical} 
+          icon={AlertTriangle} 
+          iconColor="text-rose-500" 
+          subLabel="H-3 atau perlu eskalasi"
+          onClick={() => router.push('/tasks')}
+        />
+      </div>
+
+      {/* Baris 2: Beban Kerja Pegawai & Grafik Ritme Penyelesaian */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <WorkloadCard data={workloadData} />
+
+        {/* Card Ritme / Distribusi Capaian Real-Time */}
+        <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-bold text-stone-900">Ritme Penyelesaian Tugas</h4>
+            <span className="text-[11px] text-stone-400 font-medium">Bulan 1 s.d. 8</span>
+          </div>
+
+          <div className="h-40 flex items-end justify-between gap-3 pt-6 px-3">
+            {chartBars.map((bar, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
+                <div
+                  className="w-full max-w-[26px] bg-primary rounded-t-lg hover:opacity-85 transition-all duration-200"
+                  style={{ height: bar.val }}
+                  title={`Capaian ${bar.label}: ${bar.val}`}
+                />
+                <span className="text-[10px] text-stone-400 font-mono">{bar.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Baris 3: Tabel Tugas Kritis Real-Time / H-3 */}
+      <UrgentTaskTable tasks={urgentTasks} />
+    </div>
+  );
+}
