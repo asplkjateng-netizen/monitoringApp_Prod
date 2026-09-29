@@ -7,8 +7,7 @@ import {
   Clock, 
   AlertTriangle, 
   ListTodo, 
-  BarChart2,
-  RefreshCw
+  RefreshCw 
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { MetricCard } from '@/components/dashboard/metric-card';
@@ -111,10 +110,12 @@ export default function DashboardPage() {
       return;
     }
 
-    // Hitung Metrik & Tugas Kritis
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    // 4. Hitung Metrik & Tugas Kritis Berdasarkan Tanggal Hari Ini
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const threeDaysLater = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const threeDaysLaterStr = threeDaysLater.toISOString().split('T')[0];
 
     let completedCount = 0;
     let inProgressCount = 0;
@@ -124,7 +125,8 @@ export default function DashboardPage() {
     tasks.forEach((t) => {
       const isCompleted = t.status === 'SELESAI';
       const isKendala = t.status === 'TERKENDALA';
-      const isOverdueOrH3 = !isCompleted && t.deadline <= threeDaysLater;
+      // Kritis jika terkendala ATAU belum selesai dan tenggat <= H-3 (termasuk yang lewat tenggat)
+      const isOverdueOrH3 = !isCompleted && t.deadline <= threeDaysLaterStr;
 
       if (isCompleted) {
         completedCount++;
@@ -145,9 +147,11 @@ export default function DashboardPage() {
       critical: criticalCount,
     });
 
-    setUrgentTasks(criticalList.slice(0, 5)); // 5 tugas paling mendesak
+    // Urutkan tugas kritis: yang paling lampau / mendekati tenggat di posisi teratas
+    criticalList.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+    setUrgentTasks(criticalList.slice(0, 5)); // Tampilkan 5 tugas paling mendesak
 
-    // 4. Hitung Distribusi Beban Kerja (Berdasarkan PIC Pegawai)
+    // 5. Hitung Distribusi Beban Kerja (Berdasarkan PIC Pegawai)
     const taskIds = tasks.map((t) => t.id);
     if (taskIds.length > 0) {
       const { data: pics } = await supabase
@@ -187,7 +191,7 @@ export default function DashboardPage() {
       setWorkloadData([]);
     }
 
-    // 5. Hitung Ritme Capaian Per Bulan (Bulan 1 s.d. 8 / periode aktif)
+    // 6. Hitung Ritme Capaian Per Bulan (Bulan 1 s.d. 8 / periode berjalan)
     const monthlyStats: { [key: number]: { total: number; completed: number } } = {};
     for (let m = 1; m <= 8; m++) {
       monthlyStats[m] = { total: 0, completed: 0 };
@@ -255,7 +259,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 4 Kartu Metrik Ringkasan (Dengan Drill-Down Link) */}
+      {/* 4 Kartu Metrik Ringkasan (Dengan Drill-Down Link Terfilter) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard 
           label="Total Target Tusi" 
@@ -263,7 +267,7 @@ export default function DashboardPage() {
           icon={ListTodo} 
           iconColor="text-blue-500" 
           subLabel="Target periode berjalan"
-          onClick={() => router.push('/tasks')}
+          onClick={() => router.push('/tasks?status=ALL')}
         />
         <MetricCard 
           label="Tuntas Selesai" 
@@ -271,7 +275,7 @@ export default function DashboardPage() {
           icon={CheckCircle2} 
           iconColor="text-emerald-500" 
           subLabel="Tervalidasi link bukti"
-          onClick={() => router.push('/tasks')}
+          onClick={() => router.push('/tasks?status=SELESAI')}
         />
         <MetricCard 
           label="Dalam Pengerjaan" 
@@ -279,7 +283,7 @@ export default function DashboardPage() {
           icon={Clock} 
           iconColor="text-amber-500" 
           subLabel="Tahapan sub-tugas aktif"
-          onClick={() => router.push('/tasks')}
+          onClick={() => router.push('/tasks?status=ON_PROGRESS')}
         />
         <MetricCard 
           label="Terkendala / Kritis" 
@@ -287,7 +291,7 @@ export default function DashboardPage() {
           icon={AlertTriangle} 
           iconColor="text-rose-500" 
           subLabel="H-3 atau perlu eskalasi"
-          onClick={() => router.push('/tasks')}
+          onClick={() => router.push('/tasks?status=KRITIS')}
         />
       </div>
 
