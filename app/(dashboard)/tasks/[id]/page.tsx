@@ -14,7 +14,8 @@ import {
   ExternalLink, 
   Link as LinkIcon,
   ShieldAlert,
-  Save
+  Save,
+  Loader2
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -27,6 +28,7 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<any>(null);
   const [subtasks, setSubtasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addingSubtask, setAddingSubtask] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [evidenceLinkInput, setEvidenceLinkInput] = useState('');
   const [kendalaInput, setKendalaInput] = useState('');
@@ -41,7 +43,8 @@ export default function TaskDetailPage() {
 
   const loadTaskDetails = async () => {
     setLoading(true);
-    // 1. Ambil data Task
+    setErrorMsg('');
+
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
       .select('*')
@@ -49,7 +52,7 @@ export default function TaskDetailPage() {
       .single();
 
     if (taskError || !taskData) {
-      setErrorMsg('Tugas tidak ditemukan');
+      setErrorMsg('Tugas tidak ditemukan atau terjadi kesalahan akses.');
       setLoading(false);
       return;
     }
@@ -58,63 +61,74 @@ export default function TaskDetailPage() {
     setEvidenceLinkInput(taskData.evidence_link || '');
     setKendalaInput(taskData.kendala_note || '');
 
-    // 2. Ambil data Subtasks
-    const { data: subData } = await supabase
+    const { data: subData, error: subError } = await supabase
       .from('subtasks')
       .select('*')
       .eq('task_id', taskId)
       .order('created_at', { ascending: true });
 
-    if (subData) setSubtasks(subData);
+    if (subError) {
+      console.error('Error load subtasks:', subError);
+    } else {
+      setSubtasks(subData || []);
+    }
+
     setLoading(false);
   };
 
-  // Toggle checklist subtask -> memicu trigger otomatis update progress_pct di tasks
   const handleToggleSubtask = async (subtaskId: string, currentStatus: boolean) => {
     const { error } = await supabase
       .from('subtasks')
       .update({ is_completed: !currentStatus, updated_at: new Date().toISOString() })
       .eq('id', subtaskId);
 
-    if (!error) {
-      // Reload untuk mendapatkan persentase hasil trigger DB
+    if (error) {
+      setErrorMsg('Gagal memperbarui status tahapan: ' + error.message);
+    } else {
       loadTaskDetails();
     }
   };
 
-  // Tambah subtask baru
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtaskTitle.trim()) return;
+
+    setAddingSubtask(true);
+    setErrorMsg('');
 
     const { error } = await supabase
       .from('subtasks')
       .insert({
         task_id: taskId,
         title: newSubtaskTitle.trim(),
-        is_completed: false
+        is_completed: false,
+        evidence_link_type: 'INHERIT'
       });
 
-    if (!error) {
+    if (error) {
+      setErrorMsg('Gagal menambahkan subtask: ' + error.message);
+    } else {
       setNewSubtaskTitle('');
+      await loadTaskDetails();
+    }
+    setAddingSubtask(false);
+  };
+
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId);
+    if (error) {
+      setErrorMsg('Gagal menghapus subtask: ' + error.message);
+    } else {
       loadTaskDetails();
     }
   };
 
-  // Hapus subtask
-  const handleDeleteSubtask = async (subtaskId: string) => {
-    const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId);
-    if (!error) loadTaskDetails();
-  };
-
-  // Simpan Bukti Link Dokumen & Selesaikan Tugas
   const handleSaveEvidenceAndStatus = async (targetStatus?: string) => {
     setSavingEvidence(true);
     setErrorMsg('');
 
     const newStatus = targetStatus || task.status;
 
-    // Validasi aturan skema: Selesai wajib menyertakan evidence_link
     if (newStatus === 'SELESAI' && (!evidenceLinkInput || evidenceLinkInput.trim() === '')) {
       setErrorMsg('Tugas tidak dapat diselesaikan tanpa Link Bukti Dukung (Google Drive/Cloud Storage)!');
       setSavingEvidence(false);
@@ -140,6 +154,51 @@ export default function TaskDetailPage() {
     setSavingEvidence(false);
   };
 
+  // Helper kalkulasi sisa/terlambat hari
+  const getDeadlineStatusBadge = () => {
+    if (!task) return null;
+    if (task.status === 'SELESAI') {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Selesai Tervalidasi
+        </span>
+      );
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const deadlineDate = new Date(task.deadline);
+    deadlineDate.setHours(0, 0, 0, 0);
+    const diffTime = deadlineDate.getTime() - today.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-red-600 text-white shadow-xs">
+          <AlertCircle className="w-3.5 h-3.5" /> Terlambat {Math.abs(diffDays)} hari
+        </span>
+      );
+    } else if (diffDays === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-500 text-white">
+          <Clock className="w-3.5 h-3.5" /> Batas Hari Ini
+        </span>
+      );
+    } else if (diffDays <= 3) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+          <Clock className="w-3.5 h-3.5" /> Sisa {diffDays} hari lagi
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
+          <Clock className="w-3.5 h-3.5" /> Sisa {diffDays} hari
+        </span>
+      );
+    }
+  };
+
   if (loading) {
     return <div className="p-12 text-center text-sm text-stone-400">Memuat detail tugas...</div>;
   }
@@ -156,14 +215,15 @@ export default function TaskDetailPage() {
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
       {/* Top Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/tasks"
           className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {getDeadlineStatusBadge()}
           <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-100 text-stone-700">
             Prioritas: {task.priority}
           </span>
@@ -203,7 +263,6 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* Progress Bar Header */}
         <div className="pt-2 space-y-1.5">
           <div className="flex justify-between text-xs font-semibold text-stone-700">
             <span>Penyelesaian Sub-pekerjaan</span>
@@ -220,32 +279,30 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Grid: Subtasks (Kiri) & Evidence/Action (Kanan) */}
+      {/* Subtasks (Kiri) & Evidence (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Kolom Subtasks (2 Kolom) */}
         <div className="md:col-span-2 bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4">
           <h2 className="font-bold text-stone-900 text-base">Checklist Sub-pekerjaan</h2>
           <p className="text-xs text-stone-500">Centang sub-tugas yang telah selesai untuk mengalkulasi progres otomatis.</p>
 
-          {/* Form Quick Add Subtask */}
           <form onSubmit={handleAddSubtask} className="flex gap-2">
             <input
               type="text"
               placeholder="Tambahkan tahapan/sub-pekerjaan baru..."
               value={newSubtaskTitle}
               onChange={(e) => setNewSubtaskTitle(e.target.value)}
-              className="flex-1 px-3.5 py-2 text-sm bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+              className="flex-1 px-3.5 py-2 text-sm bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
             />
             <button
               type="submit"
-              className="px-3 py-2 bg-stone-900 text-white rounded-xl hover:bg-stone-800 transition-colors text-xs font-medium flex items-center gap-1"
+              disabled={addingSubtask || !newSubtaskTitle.trim()}
+              className="px-4 py-2 bg-stone-900 text-white rounded-xl hover:bg-stone-800 disabled:bg-stone-300 transition-colors text-xs font-medium flex items-center gap-1"
             >
-              <Plus className="w-4 h-4" /> Tambah
+              {addingSubtask ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Tambah
             </button>
           </form>
 
-          {/* Subtask Items */}
           <div className="divide-y divide-stone-100 pt-2">
             {subtasks.length === 0 ? (
               <p className="text-xs text-stone-400 py-6 text-center">Belum ada tahapan sub-pekerjaan.</p>
@@ -276,7 +333,7 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Kolom Bukti & Eksekusi Status (1 Kolom) */}
+        {/* Validasi Bukti Dokumen */}
         <div className="bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <h2 className="font-bold text-stone-900 text-base">Validasi Dokumen Bukti</h2>
@@ -292,7 +349,7 @@ export default function TaskDetailPage() {
                   placeholder="https://drive.google.com/..."
                   value={evidenceLinkInput}
                   onChange={(e) => setEvidenceLinkInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
               {task.evidence_link && (
@@ -314,12 +371,11 @@ export default function TaskDetailPage() {
                 placeholder="Tuliskan kendala jika ada..."
                 value={kendalaInput}
                 onChange={(e) => setKendalaInput(e.target.value)}
-                className="w-full p-2.5 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+                className="w-full p-2.5 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 resize-none"
               />
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="space-y-2 pt-4 border-t border-stone-100">
             <button
               onClick={() => handleSaveEvidenceAndStatus('SELESAI')}
@@ -349,7 +405,6 @@ export default function TaskDetailPage() {
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );
