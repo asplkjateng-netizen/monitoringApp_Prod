@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { ChevronDown, UserCircle2, User, LogOut, CalendarDays, Check } from 'lucide-react';
@@ -19,7 +19,7 @@ const PERIOD_OPTIONS = [
   { id: 'ALL', label: 'Semua Periode', desc: 'Tampilkan seluruhnya' },
 ];
 
-export function TopBar() {
+function TopBarContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -32,7 +32,7 @@ export function TopBar() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const periodRef = useRef<HTMLDivElement>(null);
 
-  const activePeriod = searchParams.get('period') || 'CURRENT_MONTH';
+  const activePeriod = searchParams?.get('period') || 'CURRENT_MONTH';
   const selectedPeriodObj = PERIOD_OPTIONS.find((p) => p.id === activePeriod) || PERIOD_OPTIONS[0];
 
   useEffect(() => {
@@ -63,7 +63,7 @@ export function TopBar() {
 
   const handleSelectPeriod = (periodId: string) => {
     setIsPeriodOpen(false);
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(searchParams ? searchParams.toString() : '');
     params.set('period', periodId);
     router.push(`${pathname}?${params.toString()}`);
   };
@@ -185,5 +185,27 @@ export function TopBar() {
         </div>
       </div>
     </header>
+  );
+}
+
+// Fallback skeleton sederhana saat TopBarContent dimuat
+function TopBarSkeleton() {
+  return (
+    <header className="h-20 bg-canvas px-6 md:px-8 flex items-center justify-between border-b border-stone-200/40 sticky top-0 z-30">
+      <div className="h-8 w-44 bg-white/80 rounded-full animate-pulse border border-stone-200/60" />
+      <div className="flex items-center gap-3">
+        <div className="h-8 w-36 bg-white/80 rounded-full animate-pulse border border-stone-200/60" />
+        <div className="w-9 h-9 rounded-full bg-white/80 animate-pulse border border-stone-200/60" />
+      </div>
+    </header>
+  );
+}
+
+// Export utama yang dibungkus Suspense agar lolos build Next.js 15
+export function TopBar() {
+  return (
+    <Suspense fallback={<TopBarSkeleton />}>
+      <TopBarContent />
+    </Suspense>
   );
 }
