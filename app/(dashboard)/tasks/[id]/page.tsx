@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   ArrowLeft, 
-  Calendar, 
   CheckCircle2, 
   Clock, 
   AlertCircle, 
@@ -17,7 +16,8 @@ import {
   Save,
   Loader2,
   Edit3,
-  CalendarDays
+  CalendarDays,
+  Info
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -47,6 +47,7 @@ export default function TaskDetailPage() {
   const [deletingTask, setDeletingTask] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [manualNotice, setManualNotice] = useState<string>('');
 
   useEffect(() => {
     if (taskId) {
@@ -102,18 +103,68 @@ export default function TaskDetailPage() {
     setLoading(false);
   };
 
-  // Toggle Subtask
+  // Helper Warna Progress Bar
+  const getProgressBarColor = (pct: number) => {
+    if (pct >= 80) return 'bg-emerald-500';
+    if (pct >= 31) return 'bg-amber-400';
+    return 'bg-rose-500';
+  };
+
+  // Toggle Subtask dengan Otomasi Status Default
   const handleToggleSubtask = async (subtaskId: string, currentStatusVal: boolean) => {
-    const { error } = await supabase
+    const nextVal = !currentStatusVal;
+
+    // Hitung proyeksi status lokal
+    const updatedSubtasks = subtasks.map((s) =>
+      s.id === subtaskId ? { ...s, is_completed: nextVal } : s
+    );
+    const total = updatedSubtasks.length;
+    const completed = updatedSubtasks.filter((s) => s.is_completed).length;
+    const calcProgress = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    // Tentukan status otomatis jika bukan sedang terkendala
+    let nextStatus = currentStatus;
+    if (currentStatus !== 'TERKENDALA') {
+      if (completed === total) {
+        nextStatus = 'SELESAI';
+      } else if (completed > 0) {
+        nextStatus = 'ON_PROGRESS';
+      } else {
+        nextStatus = 'BELUM_DIKERJAKAN';
+      }
+    }
+
+    // 1. Simpan perubahan subtask
+    const { error: subtaskErr } = await supabase
       .from('subtasks')
-      .update({ is_completed: !currentStatusVal, updated_at: new Date().toISOString() })
+      .update({ is_completed: nextVal, updated_at: new Date().toISOString() })
       .eq('id', subtaskId);
 
-    if (error) {
-      setErrorMsg('Gagal memperbarui checklist: ' + error.message);
-    } else {
-      loadTaskDetails();
+    if (subtaskErr) {
+      setErrorMsg('Gagal memperbarui checklist: ' + subtaskErr.message);
+      return;
     }
+
+    // 2. Sinkronkan progres dan status otomatis ke database
+    await supabase
+      .from('tasks')
+      .update({
+        progress_pct: calcProgress,
+        status: nextStatus,
+        completed_at: nextStatus === 'SELESAI' ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', taskId);
+
+    setCurrentStatus(nextStatus);
+    setManualNotice('');
+
+    if (nextStatus === 'SELESAI') {
+      setSuccessMsg('Semua tahapan tuntas! Status otomatis beralih ke "Selesai".');
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+
+    await loadTaskDetails();
   };
 
   // Tambah Subtask
@@ -123,7 +174,6 @@ export default function TaskDetailPage() {
 
     setAddingSubtask(true);
     setErrorMsg('');
-    setSuccessMsg('');
 
     const { error } = await supabase
       .from('subtasks')
@@ -131,11 +181,11 @@ export default function TaskDetailPage() {
         task_id: taskId,
         title: newSubtaskTitle.trim(),
         is_completed: false,
-        evidence_link_type: 'INHERIT'
+        evidence_link_type: 'INHERIT',
       });
 
     if (error) {
-      setErrorMsg('Gagal menyimpan subtask baru: ' + error.message + '. Pastikan RLS subtasks sudah diatur.');
+      setErrorMsg('Gagal menyimpan subtask: ' + error.message);
     } else {
       setNewSubtaskTitle('');
       await loadTaskDetails();
@@ -153,21 +203,19 @@ export default function TaskDetailPage() {
     }
   };
 
+  // Handler saat status diubah manual oleh pengguna
+  const handleManualStatusChange = (val: string) => {
+    setCurrentStatus(val);
+    setManualNotice(`Perhatian: Anda mengubah status secara manual menjadi "${val}". Klik tombol "Simpan Pembaruan Tugas" untuk menerapkan.`);
+  };
+
   // Simpan Seluruh Perubahan Cepat (Status, Deadline, Prioritas, Bukti & Kendala)
-  const handleSaveChanges = async (targetStatusOverride?: string) => {
+  const handleSaveChanges = async () => {
     setSavingChanges(true);
     setErrorMsg('');
     setSuccessMsg('');
 
-    const finalStatus = targetStatusOverride || currentStatus;
-
-    if (finalStatus === 'SELESAI' && (!evidenceLinkInput || evidenceLinkInput.trim() === '')) {
-      setErrorMsg('Status "Selesai" wajib menyertakan Link Bukti Dokumen (Google Drive/Cloud)!');
-      setSavingChanges(false);
-      return;
-    }
-
-    if (finalStatus === 'TERKENDALA' && (!kendalaInput || kendalaInput.trim() === '')) {
+    if (currentStatus === 'TERKENDALA' && (!kendalaInput || kendalaInput.trim() === '')) {
       setErrorMsg('Status "Terkendala" wajib mencantumkan catatan kendala.');
       setSavingChanges(false);
       return;
@@ -176,21 +224,22 @@ export default function TaskDetailPage() {
     const { error } = await supabase
       .from('tasks')
       .update({
-        status: finalStatus,
+        status: currentStatus,
         deadline: currentDeadline,
         priority: currentPriority,
         evidence_link: evidenceLinkInput.trim() || null,
-        kendala_note: finalStatus === 'TERKENDALA' ? kendalaInput.trim() : (kendalaInput.trim() || null),
-        completed_at: finalStatus === 'SELESAI' ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString()
+        kendala_note: currentStatus === 'TERKENDALA' ? kendalaInput.trim() : (kendalaInput.trim() || null),
+        completed_at: currentStatus === 'SELESAI' ? (task?.completed_at || new Date().toISOString()) : null,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', taskId);
 
     if (error) {
       setErrorMsg('Gagal menyimpan perubahan: ' + error.message);
     } else {
-      setSuccessMsg('Perubahan data tugas berhasil disimpan!');
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`Status tugas berhasil diperbarui ke "${currentStatus}"!`);
+      setManualNotice('');
+      setTimeout(() => setSuccessMsg(''), 4000);
       loadTaskDetails();
     }
     setSavingChanges(false);
@@ -273,7 +322,7 @@ export default function TaskDetailPage() {
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
-      {/* Top Bar Navigasi & Aksi CRUD Hapus/Edit */}
+      {/* Top Bar Navigasi & Aksi CRUD */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/tasks"
@@ -283,7 +332,6 @@ export default function TaskDetailPage() {
         </Link>
         
         <div className="flex items-center gap-2">
-          {/* Tombol Edit Lengkap */}
           <Link
             href={`/tasks/${taskId}/edit`}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-white border border-stone-200 hover:bg-stone-50 transition-colors shadow-xs"
@@ -292,7 +340,6 @@ export default function TaskDetailPage() {
             Edit Lengkap
           </Link>
 
-          {/* Tombol Hapus Tugas */}
           <button
             onClick={handleDeleteTask}
             disabled={deletingTask}
@@ -304,7 +351,7 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Alert Notifikasi */}
+      {/* Alert Error / Sukses / Notifikasi Manual */}
       {errorMsg && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 flex-shrink-0" />
@@ -316,6 +363,13 @@ export default function TaskDetailPage() {
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
           <span>{successMsg}</span>
+        </div>
+      )}
+
+      {manualNotice && (
+        <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center gap-2">
+          <Info className="w-4 h-4 flex-shrink-0 text-blue-600" />
+          <span>{manualNotice}</span>
         </div>
       )}
 
@@ -346,7 +400,6 @@ export default function TaskDetailPage() {
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-stone-900">{task.title}</h1>
           
-          {/* Ubah Tenggat Waktu Langsung */}
           <div className="flex items-center gap-2 text-xs text-stone-600 pt-1">
             <CalendarDays className="w-4 h-4 text-[#DF3B68]" />
             <span className="font-semibold">Tenggat Waktu:</span>
@@ -372,7 +425,6 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* PIC Daftar Pegawai */}
         {pics.length > 0 && (
           <div className="pt-1 flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-stone-500">PIC Pelaksana:</span>
@@ -384,39 +436,36 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* Progres Otomatis dari Subtask */}
+        {/* Dynamic Multi-Color Progress Bar */}
         <div className="pt-2 space-y-1.5">
           <div className="flex justify-between text-xs font-semibold text-stone-700">
             <span>Kalkulasi Progres Pelaksanaan</span>
-            <span>{task.progress_pct}%</span>
+            <span className="font-mono">{task.progress_pct}%</span>
           </div>
           <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
             <div 
-              className={`h-full transition-all duration-500 rounded-full ${
-                task.progress_pct === 100 ? 'bg-emerald-500' : 'bg-[#DF3B68]'
-              }`}
-              style={{ width: `${task.progress_pct}%` }}
+              className={`h-full transition-all duration-500 rounded-full ${getProgressBarColor(task.progress_pct || 0)}`}
+              style={{ width: `${task.progress_pct || 0}%` }}
             />
           </div>
         </div>
       </div>
 
-      {/* Grid: Subtasks (Kiri) & Kontrol Status & Bukti (Kanan) */}
+      {/* Subtasks (Kiri) & Kontrol Status (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        {/* Kolom Subtasks (2 Kolom) */}
+        {/* Kolom Subtasks */}
         <div className="md:col-span-2 bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
               <h2 className="font-bold text-stone-900 text-base">Checklist Sub-pekerjaan</h2>
-              <p className="text-xs text-stone-500">Centang tahapan yang selesai untuk mengkalkulasi progres otomatis.</p>
+              <p className="text-xs text-stone-500">Centang tahapan untuk mengalkulasi progres otomatis & mengubah status.</p>
             </div>
-            <span className="text-xs font-semibold text-stone-400">
+            <span className="text-xs font-semibold text-stone-500 bg-stone-100 px-2.5 py-1 rounded-full">
               {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
             </span>
           </div>
 
-          {/* Form Tambah Subtask */}
           <form onSubmit={handleAddSubtask} className="flex gap-2">
             <input
               type="text"
@@ -435,11 +484,10 @@ export default function TaskDetailPage() {
             </button>
           </form>
 
-          {/* Daftar Subtask */}
           <div className="divide-y divide-stone-100 pt-1">
             {subtasks.length === 0 ? (
               <div className="py-8 text-center text-xs text-stone-400">
-                Belum ada tahapan sub-pekerjaan. Tambahkan tahapan pertama melalui form di atas.
+                Belum ada tahapan sub-pekerjaan. Tambahkan tahapan di atas.
               </div>
             ) : (
               subtasks.map((st, idx) => (
@@ -451,7 +499,7 @@ export default function TaskDetailPage() {
                       onChange={() => handleToggleSubtask(st.id, st.is_completed)}
                       className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 cursor-pointer"
                     />
-                    <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                    <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400 font-normal' : 'text-stone-800 font-medium'}`}>
                       {idx + 1}. {st.title}
                     </span>
                   </label>
@@ -468,19 +516,19 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Kolom Kontrol Status & Bukti Dokumen (1 Kolom) */}
+        {/* Kolom Kontrol Status & Bukti */}
         <div className="bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <h2 className="font-bold text-stone-900 text-base">Status & Validasi Bukti</h2>
 
-            {/* Selector Status Langsung */}
+            {/* Selector Status Manual dengan Trigger Notifikasi */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
                 Ubah Status Pekerjaan:
               </label>
               <select
                 value={currentStatus}
-                onChange={(e) => setCurrentStatus(e.target.value)}
+                onChange={(e) => handleManualStatusChange(e.target.value)}
                 className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-stone-200 bg-stone-50 focus:ring-2 focus:ring-[#DF3B68]/20"
               >
                 <option value="BELUM_DIKERJAKAN">Belum Mulai</option>
@@ -493,7 +541,7 @@ export default function TaskDetailPage() {
             {/* Input Link Bukti */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
-                Link Bukti Dukung (Wajib saat Selesai)
+                Link Bukti Dukung (Google Drive / Cloud)
               </label>
               <div className="relative">
                 <LinkIcon className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -535,7 +583,7 @@ export default function TaskDetailPage() {
           {/* Tombol Simpan Perubahan Cepat */}
           <div className="space-y-2 pt-4 border-t border-stone-100">
             <button
-              onClick={() => handleSaveChanges()}
+              onClick={handleSaveChanges}
               disabled={savingChanges}
               className="w-full py-2.5 px-4 bg-[#DF3B68] hover:bg-[#C72F58] disabled:bg-stone-200 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-xs"
             >
