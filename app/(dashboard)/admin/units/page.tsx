@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   Plus, 
@@ -11,7 +11,10 @@ import {
   CheckCircle2, 
   AlertCircle,
   FolderTree,
-  CornerDownRight
+  ChevronRight,
+  ChevronsUpDown,
+  CornerDownRight,
+  Layers
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -40,6 +43,10 @@ export default function UnitsAdminPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
+
+  // State untuk menyimpan ID unit yang sedang dalam status expanded (terbuka)
+  // Default: Kosong (Set()), sehingga seluruh unit bawahan tertutup secara default
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,6 +92,47 @@ export default function UnitsAdminPage() {
     setLoading(false);
   };
 
+  // Mapping hubungan anak berdasarkan parent_id
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, UnitItem[]>();
+    units.forEach((u) => {
+      if (u.parent_id) {
+        const list = map.get(u.parent_id) || [];
+        list.push(u);
+        map.set(u.parent_id, list);
+      }
+    });
+    return map;
+  }, [units]);
+
+  // Unit akar (Root): Eselon I atau yang tidak memiliki parent_id
+  const rootUnits = useMemo(() => {
+    return units.filter((u) => !u.parent_id || u.level === 'ESELON_I');
+  }, [units]);
+
+  // Toggle buka/tutup cabang unit
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    const allIdsWithChildren = new Set<string>();
+    childrenMap.forEach((_, parentId) => allIdsWithChildren.add(parentId));
+    setExpandedIds(allIdsWithChildren);
+  };
+
+  const collapseAll = () => {
+    setExpandedIds(new Set());
+  };
+
   const openCreateModal = () => {
     setEditingId(null);
     setName('');
@@ -107,7 +155,6 @@ export default function UnitsAdminPage() {
     setIsModalOpen(true);
   };
 
-  // Filter unit yang dapat menjadi induk berdasarkan level yang dipilih
   const getAvailableParents = () => {
     if (level === 'ESELON_I') return [];
     if (level === 'ESELON_II') return units.filter((u) => u.level === 'ESELON_I' && u.id !== editingId);
@@ -141,24 +188,15 @@ export default function UnitsAdminPage() {
     };
 
     if (editingId) {
-      // Update
-      const { error } = await supabase
-        .from('units')
-        .update(payload)
-        .eq('id', editingId);
-
+      const { error } = await supabase.from('units').update(payload).eq('id', editingId);
       if (error) {
-        setErrorMsg(error.message.includes('unique') ? 'Kode unit sudah digunakan oleh unit lain.' : error.message);
+        setErrorMsg(error.message.includes('unique') ? 'Kode unit sudah digunakan unit lain.' : error.message);
         setIsSubmitting(false);
         return;
       }
       setSuccessMsg('Unit organisasi berhasil diperbarui.');
     } else {
-      // Insert Baru
-      const { error } = await supabase
-        .from('units')
-        .insert(payload);
-
+      const { error } = await supabase.from('units').insert(payload);
       if (error) {
         setErrorMsg(error.message.includes('unique') ? 'Kode unit sudah terdaftar sebelumnya.' : error.message);
         setIsSubmitting(false);
@@ -189,14 +227,6 @@ export default function UnitsAdminPage() {
     }
   };
 
-  const filteredUnits = units.filter((u) => {
-    const matchesSearch = 
-      u.name.toLowerCase().includes(search.toLowerCase()) || 
-      u.code.toLowerCase().includes(search.toLowerCase());
-    const matchesLevel = levelFilter === 'ALL' || u.level === levelFilter;
-    return matchesSearch && matchesLevel;
-  });
-
   const getLevelBadge = (lvl: UnitLevel) => {
     switch (lvl) {
       case 'ESELON_I':
@@ -210,6 +240,112 @@ export default function UnitsAdminPage() {
     }
   };
 
+  // Komponen Rekursif untuk merender node pohon
+  const renderUnitTree = (unit: UnitItem, depth: number = 0) => {
+    const children = childrenMap.get(unit.id) || [];
+    const hasChildren = children.length > 0;
+    const isExpanded = expandedIds.has(unit.id);
+
+    return (
+      <div key={unit.id} className="relative group">
+        {/* Baris Unit */}
+        <div
+          onClick={() => hasChildren && toggleExpand(unit.id)}
+          className={`flex items-center justify-between p-3.5 md:p-4 rounded-2xl transition-all border ${
+            depth === 0
+              ? 'bg-white border-stone-200/80 shadow-xs hover:border-stone-300'
+              : depth === 1
+              ? 'bg-stone-50/70 border-stone-200/60 ml-4 md:ml-8 mt-2 hover:bg-stone-100/70'
+              : depth === 2
+              ? 'bg-stone-50/40 border-stone-200/50 ml-8 md:ml-16 mt-2 hover:bg-stone-100/50'
+              : 'bg-white border-stone-200/40 ml-12 md:ml-24 mt-2 hover:bg-stone-50'
+          } ${hasChildren ? 'cursor-pointer' : ''}`}
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {/* Tombol Chevron Expand/Collapse */}
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpand(unit.id);
+                }}
+                className="w-7 h-7 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-600 transition-transform"
+                title={isExpanded ? 'Sembunyikan Sub-unit' : 'Tampilkan Sub-unit'}
+              >
+                <ChevronRight
+                  className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-primary font-bold' : ''}`}
+                />
+              </button>
+            ) : (
+              <div className="w-7 h-7 flex items-center justify-center">
+                <span className="w-1.5 h-1.5 rounded-full bg-stone-300" />
+              </div>
+            )}
+
+            {/* Konten Informasi Unit */}
+            <div className="space-y-1 min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                {getLevelBadge(unit.level)}
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
+                  {unit.code}
+                </span>
+                {unit.tusi_type && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200">
+                    TUSI: {unit.tusi_type}
+                  </span>
+                )}
+                {hasChildren && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-stone-100 text-stone-500">
+                    {children.length} sub-unit
+                  </span>
+                )}
+              </div>
+              <p className="font-bold text-stone-900 text-xs md:text-sm truncate">
+                {unit.name}
+              </p>
+            </div>
+          </div>
+
+          {/* Action Buttons (Edit & Delete) */}
+          <div className="flex items-center gap-1.5 ml-3" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => openEditModal(unit)}
+              className="p-1.5 md:p-2 rounded-xl text-stone-500 hover:text-stone-800 hover:bg-white border border-transparent hover:border-stone-200 transition-all"
+              title="Edit Unit"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => handleDelete(unit.id, unit.name)}
+              className="p-1.5 md:p-2 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all"
+              title="Hapus Unit"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Anak-anak Unit (Hanya dirender jika expanded) */}
+        {hasChildren && isExpanded && (
+          <div className="relative border-l-2 border-dashed border-stone-200 ml-6 md:ml-9 space-y-1.5 pb-1 animate-in fade-in slide-in-from-top-1 duration-150">
+            {children.map((child) => renderUnitTree(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Mode Filter/Pencarian Langsung (Flat List ketika ada query cari)
+  const isSearchMode = search.trim() !== '' || levelFilter !== 'ALL';
+  const filteredFlatUnits = units.filter((u) => {
+    const matchesSearch = 
+      u.name.toLowerCase().includes(search.toLowerCase()) || 
+      u.code.toLowerCase().includes(search.toLowerCase());
+    const matchesLevel = levelFilter === 'ALL' || u.level === levelFilter;
+    return matchesSearch && matchesLevel;
+  });
+
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -217,7 +353,7 @@ export default function UnitsAdminPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Hierarki Unit Organisasi</h1>
           <p className="text-xs text-stone-500 mt-1">
-            Kelola struktur vertikal instansi (Pusat, Kantor Wilayah, KPPN, dan Seksi/Subbagian).
+            Struktur vertikal interaktif instansi. Klik unit untuk menelusuri sub-bagian di bawahnya.
           </p>
         </div>
         <Button
@@ -236,7 +372,7 @@ export default function UnitsAdminPage() {
         </div>
       )}
 
-      {/* Filter & Live Search */}
+      {/* Filter & Live Search Toolbar */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200/70 shadow-sm">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -252,7 +388,7 @@ export default function UnitsAdminPage() {
         {/* Tab Filter Tingkatan Level */}
         <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
           {[
-            { id: 'ALL', label: 'Semua Level' },
+            { id: 'ALL', label: 'Hierarki Penuh' },
             { id: 'ESELON_I', label: 'Eselon I' },
             { id: 'ESELON_II', label: 'Eselon II' },
             { id: 'ESELON_III', label: 'Eselon III' },
@@ -273,64 +409,107 @@ export default function UnitsAdminPage() {
         </div>
       </div>
 
-      {/* Tabel Data Unit */}
-      <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="py-20 text-center text-xs text-stone-400">Memuat hierarki unit kerja...</div>
-        ) : filteredUnits.length === 0 ? (
-          <div className="py-20 text-center space-y-1">
-            <Building2 className="w-8 h-8 text-stone-300 mx-auto" />
-            <p className="text-stone-500 font-medium text-xs">Belum ada unit yang cocok</p>
-            <p className="text-stone-400 text-[11px]">Silakan sesuaikan kata kunci pencarian atau tambah unit baru.</p>
+      {/* Kontrol Cepat Collapse / Expand (Hanya tampil saat mode pohon hierarki) */}
+      {!isSearchMode && (
+        <div className="flex items-center justify-between px-1">
+          <p className="text-xs text-stone-400 flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-stone-400" />
+            <span>Klik pada nama kantor untuk melihat sub-unit bawahan</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={expandAll}
+              className="text-xs font-semibold text-stone-600 hover:text-stone-900 bg-white border border-stone-200/80 px-3 py-1.5 rounded-xl shadow-2xs hover:bg-stone-50 transition-all"
+            >
+              Buka Semua
+            </button>
+            <button
+              type="button"
+              onClick={collapseAll}
+              className="text-xs font-semibold text-stone-600 hover:text-stone-900 bg-white border border-stone-200/80 px-3 py-1.5 rounded-xl shadow-2xs hover:bg-stone-50 transition-all"
+            >
+              Tutup Semua
+            </button>
           </div>
-        ) : (
-          <div className="divide-y divide-stone-100">
-            {filteredUnits.map((u) => (
-              <div
-                key={u.id}
-                className="p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-stone-50/60 transition-colors"
-              >
-                <div className="space-y-1.5 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {getLevelBadge(u.level)}
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
-                      {u.code}
-                    </span>
-                    {u.tusi_type && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200">
-                        TUSI: {u.tusi_type}
+        </div>
+      )}
+
+      {/* Kontainer Render Unit */}
+      <div className="space-y-3">
+        {loading ? (
+          <div className="bg-white rounded-3xl p-16 text-center text-xs text-stone-400 border border-stone-200/70 shadow-sm">
+            Memuat hierarki unit kerja...
+          </div>
+        ) : isSearchMode ? (
+          /* Tampilan Pencarian Langsung (Flat) */
+          <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden divide-y divide-stone-100">
+            {filteredFlatUnits.length === 0 ? (
+              <div className="py-16 text-center space-y-1">
+                <Building2 className="w-8 h-8 text-stone-300 mx-auto" />
+                <p className="text-stone-600 font-semibold text-xs">Unit tidak ditemukan</p>
+                <p className="text-stone-400 text-[11px]">Coba sesuaikan kata kunci atau bersihkan filter.</p>
+              </div>
+            ) : (
+              filteredFlatUnits.map((u) => (
+                <div
+                  key={u.id}
+                  className="p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-stone-50/60 transition-colors"
+                >
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {getLevelBadge(u.level)}
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
+                        {u.code}
                       </span>
+                      {u.tusi_type && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200">
+                          TUSI: {u.tusi_type}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-bold text-stone-900 text-sm md:text-base">{u.name}</h3>
+                    {u.parent && (
+                      <div className="flex items-center gap-1.5 text-xs text-stone-500 pt-0.5">
+                        <CornerDownRight className="w-3.5 h-3.5 text-stone-400" />
+                        <span>Induk: <strong className="text-stone-700">{u.parent.name}</strong> ({u.parent.code})</span>
+                      </div>
                     )}
                   </div>
-                  <h3 className="font-bold text-stone-900 text-sm md:text-base">{u.name}</h3>
-                  
-                  {u.parent && (
-                    <div className="flex items-center gap-1.5 text-xs text-stone-500 pt-0.5">
-                      <CornerDownRight className="w-3.5 h-3.5 text-stone-400" />
-                      <span>Induk: <strong className="text-stone-700">{u.parent.name}</strong> ({u.parent.code})</span>
-                    </div>
-                  )}
-                </div>
 
-                <div className="flex items-center gap-2 self-end md:self-center">
-                  <button
-                    onClick={() => openEditModal(u)}
-                    className="p-2 rounded-xl text-stone-600 bg-stone-100 hover:bg-stone-200 transition-colors"
-                    title="Edit Unit"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(u.id, u.name)}
-                    className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-100 transition-colors"
-                    title="Hapus Unit"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 self-end md:self-center">
+                    <button
+                      onClick={() => openEditModal(u)}
+                      className="p-2 rounded-xl text-stone-600 bg-stone-100 hover:bg-stone-200 transition-colors"
+                      title="Edit Unit"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(u.id, u.name)}
+                      className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-100 transition-colors"
+                      title="Hapus Unit"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
+        ) : (
+          /* Tampilan Hierarki Pohon Interaktif */
+          rootUnits.length === 0 ? (
+            <div className="bg-white rounded-3xl p-16 text-center space-y-2 border border-stone-200/70 shadow-sm">
+              <Building2 className="w-8 h-8 text-stone-300 mx-auto" />
+              <p className="text-xs font-semibold text-stone-700">Belum ada unit tingkat teratas (Eselon I)</p>
+              <p className="text-[11px] text-stone-400">Klik "Tambah Unit Baru" untuk memulai struktur organisasi.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {rootUnits.map((rootUnit) => renderUnitTree(rootUnit, 0))}
+            </div>
+          )
         )}
       </div>
 
@@ -396,7 +575,7 @@ export default function UnitsAdminPage() {
                   value={level}
                   onChange={(e) => {
                     setLevel(e.target.value as UnitLevel);
-                    setParentId(''); // Reset parent ketika level berubah
+                    setParentId('');
                   }}
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
