@@ -10,8 +10,7 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle, 
-  ExternalLink,
-  Flame
+  ExternalLink 
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -84,9 +83,15 @@ function TasksContent() {
     return Math.round((dDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
 
+  // Helper Warna Progress Bar: 0-30% Merah, 31-79% Kuning, >= 80% Hijau
+  const getProgressBarColor = (pct: number) => {
+    if (pct >= 80) return 'bg-emerald-500';
+    if (pct >= 31) return 'bg-amber-400';
+    return 'bg-rose-500';
+  };
+
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = t.title.toLowerCase().includes(search.toLowerCase());
-    
     if (!matchesSearch) return false;
 
     if (statusFilter === 'ALL') return true;
@@ -137,7 +142,7 @@ function TasksContent() {
   const getStatusBadge = (status: TaskItem['status']) => {
     switch (status) {
       case 'SELESAI':
-        return null; // Sudah dihandle urgency badge
+        return null;
       case 'ON_PROGRESS':
         return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">On Progress</span>;
       case 'TERKENDALA':
@@ -227,12 +232,11 @@ function TasksContent() {
                   </div>
                   <h3 className="font-semibold text-stone-900 text-base">{task.title}</h3>
                   
+                  {/* Progress Bar Dinamis: Merah -> Kuning -> Hijau */}
                   <div className="flex items-center gap-3 pt-1 max-w-xs">
                     <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
                       <div 
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          task.status === 'SELESAI' ? 'bg-emerald-500' : 'bg-[#DF3B68]'
-                        }`}
+                        className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(task.progress_pct || 0)}`}
                         style={{ width: `${task.progress_pct || 0}%` }}
                       />
                     </div>
