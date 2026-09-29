@@ -1,9 +1,60 @@
 import React from 'react';
 import Link from 'next/link';
-import { ExternalLink, AlertCircle } from 'lucide-react';
+import { ExternalLink, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import type { Task } from '@/types/database.types';
 
 export function UrgentTaskTable({ tasks }: { tasks: Task[] }) {
+  // Helper label status dan diferensial hari
+  const renderDeadlineBadge = (task: Task) => {
+    if (task.status === 'SELESAI') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+          <CheckCircle2 className="w-3 h-3" /> Selesai
+        </span>
+      );
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const deadlineDate = new Date(task.deadline);
+    deadlineDate.setHours(0, 0, 0, 0);
+    const diffTime = deadlineDate.getTime() - today.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-red-600 text-white shadow-xs">
+          Terlambat {Math.abs(diffDays)} hari
+        </span>
+      );
+    } else if (diffDays === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-white">
+          Batas Hari Ini
+        </span>
+      );
+    } else {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+          Sisa {diffDays} hari
+        </span>
+      );
+    }
+  };
+
+  const renderStatusBadge = (status: Task['status']) => {
+    switch (status) {
+      case 'SELESAI':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Selesai</span>;
+      case 'ON_PROGRESS':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">On Progress</span>;
+      case 'TERKENDALA':
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Terkendala</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-stone-100 text-stone-600 border border-stone-200">Belum Mulai</span>;
+    }
+  };
+
   return (
     <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
       <div className="flex items-center justify-between">
@@ -11,8 +62,8 @@ export function UrgentTaskTable({ tasks }: { tasks: Task[] }) {
           <AlertCircle className="w-4 h-4 text-primary" />
           <h4 className="text-sm font-bold text-stone-900">Tugas Kritis & Mendekati Tenggat (H-3)</h4>
         </div>
-        <Link href="/tasks" className="text-xs font-semibold text-primary hover:underline">
-          Lihat Semua Tugas →
+        <Link href="/tasks?status=KRITIS" className="text-xs font-semibold text-primary hover:underline">
+          Lihat Semua Tugas Kritis →
         </Link>
       </div>
 
@@ -21,16 +72,17 @@ export function UrgentTaskTable({ tasks }: { tasks: Task[] }) {
           <thead>
             <tr className="border-b border-stone-100 text-stone-400 uppercase text-[10px] tracking-wider">
               <th className="pb-3 font-semibold">Nama Tugas / Tusi</th>
-              <th className="pb-3 font-semibold">Tenggat Waktu</th>
+              <th className="pb-3 font-semibold">Urgensi Tenggat</th>
+              <th className="pb-3 font-semibold">Status Pekerjaan</th>
               <th className="pb-3 font-semibold">Prioritas</th>
-              <th className="pb-3 font-semibold">Status Capaian</th>
+              <th className="pb-3 font-semibold">Progres</th>
               <th className="pb-3 font-semibold text-right">Aksi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-50">
             {tasks.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-stone-400">
+                <td colSpan={6} className="py-6 text-center text-stone-400">
                   Semua tugas berjalan tepat waktu. Tidak ada tugas kritis.
                 </td>
               </tr>
@@ -38,18 +90,22 @@ export function UrgentTaskTable({ tasks }: { tasks: Task[] }) {
               tasks.map((task) => (
                 <tr key={task.id} className="hover:bg-stone-50/50 transition-colors">
                   <td className="py-3.5 font-medium text-stone-800 pr-4">{task.title}</td>
-                  <td className="py-3.5 text-stone-500 font-mono text-[11px]">{task.deadline}</td>
+                  <td className="py-3.5 whitespace-nowrap">
+                    <div className="flex flex-col gap-0.5">
+                      {renderDeadlineBadge(task)}
+                      <span className="text-[10px] text-stone-400 font-mono">{task.deadline}</span>
+                    </div>
+                  </td>
+                  <td className="py-3.5 whitespace-nowrap">{renderStatusBadge(task.status)}</td>
                   <td className="py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      task.priority === 'TINGGI' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                    }`}>
                       {task.priority}
                     </span>
                   </td>
-                  <td className="py-3.5">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-stone-100 text-stone-700">
-                      {task.progress_pct}%
-                    </span>
-                  </td>
-                  <td className="py-3.5 text-right">
+                  <td className="py-3.5 font-semibold text-stone-700">{task.progress_pct}%</td>
+                  <td className="py-3.5 text-right whitespace-nowrap">
                     <Link
                       href={`/tasks/${task.id}`}
                       className="inline-flex items-center text-primary font-semibold hover:underline"
