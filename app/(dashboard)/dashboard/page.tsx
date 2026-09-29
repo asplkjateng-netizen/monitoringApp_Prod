@@ -1,124 +1,285 @@
 'use client';
-import { useState } from 'react';
-import { CheckCircle2, Clock, AlertTriangle, ListTodo, BarChart2 } from 'lucide-react';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { 
+  CheckCircle2, 
+  Clock, 
+  AlertTriangle, 
+  ListTodo, 
+  BarChart2,
+  RefreshCw
+} from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import { MetricCard } from '@/components/dashboard/metric-card';
 import { WorkloadCard } from '@/components/dashboard/workload-card';
 import { UrgentTaskTable } from '@/components/dashboard/urgent-task-table';
 import type { Task } from '@/types/database.types';
 
+interface StaffWorkload {
+  name: string;
+  completedTasks: number;
+  totalTasks: number;
+}
+
+interface ChartBarItem {
+  label: string;
+  val: string;
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [loading, setLoading] = useState(true);
   const [filterMode, setFilterMode] = useState<'unit' | 'konsolidasi'>('unit');
 
-  // Data Distribusi Beban Kerja (Meniru ranking produk referensi)
-  const dummyWorkload = [
-    { name: 'Agung Rikhi Umboro', completedTasks: 8, totalTasks: 10 },
-    { name: 'Seksi MSKI', completedTasks: 14, totalTasks: 15 },
-    { name: 'Seksi Bank', completedTasks: 6, totalTasks: 9 },
-    { name: 'Seksi Vera', completedTasks: 4, totalTasks: 8 },
-  ];
+  // Metrik states
+  const [metrics, setMetrics] = useState({
+    total: 0,
+    completed: 0,
+    inProgress: 0,
+    critical: 0,
+  });
 
-  // Data Ritme Capaian Grafik Batang
-  const chartBars = [
-    { label: 'P1', val: '40%' },
-    { label: 'P2', val: '65%' },
-    { label: 'P3', val: '30%' },
-    { label: 'P4', val: '85%' },
-    { label: 'P5', val: '45%' },
-    { label: 'P6', val: '100%' },
-    { label: 'P7', val: '70%' },
-    { label: 'P8', val: '55%' },
-  ];
+  const [workloadData, setWorkloadData] = useState<StaffWorkload[]>([]);
+  const [chartBars, setChartBars] = useState<ChartBarItem[]>([]);
+  const [urgentTasks, setUrgentTasks] = useState<Task[]>([]);
 
-  // Data Tabel Tugas Kritis
-  const dummyUrgentTasks: Task[] = [
-    {
-      id: '1',
-      unit_id: 'u1',
-      template_id: null,
-      title: 'Laporan Rekonsiliasi Rekening Koran Triwulan I',
-      description: null,
-      legal_basis: null,
-      period_type: 'TRIWULANAN',
-      period_month: 3,
-      period_year: 2026,
-      deadline: '2026-03-31',
-      status: 'ON_PROGRESS',
-      priority: 'TINGGI',
-      progress_pct: 65,
-      evidence_link: null,
-      kendala_note: null,
-      completed_at: null,
-      created_by: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ];
+  useEffect(() => {
+    fetchDashboardMetrics();
+  }, [filterMode]);
+
+  const fetchDashboardMetrics = async () => {
+    setLoading(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    // 1. Ambil info profil & unit kerja user
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('unit_id, role, unit:units(id, name, level, parent_id)')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile?.unit_id) {
+      setLoading(false);
+      return;
+    }
+
+    // 2. Tentukan cakupan Unit IDs berdasarkan mode filter
+    let targetUnitIds: string[] = [profile.unit_id];
+
+    if (filterMode === 'konsolidasi') {
+      const userUnit = profile.unit as any;
+      if (userUnit?.level === 'SEKSI' && userUnit.parent_id) {
+        // Ambil semua seksi yang berada dalam KPPN induk yang sama
+        const { data: siblingUnits } = await supabase
+          .from('units')
+          .select('id')
+          .eq('parent_id', userUnit.parent_id);
+
+        if (siblingUnits && siblingUnits.length > 0) {
+          targetUnitIds = siblingUnits.map((u) => u.id);
+        }
+      } else if (userUnit?.level === 'ESELON_III' || userUnit?.level === 'ESELON_II') {
+        // Ambil seluruh unit anak (sub-units)
+        const { data: childUnits } = await supabase
+          .from('units')
+          .select('id')
+          .eq('parent_id', userUnit.id);
+
+        if (childUnits && childUnits.length > 0) {
+          targetUnitIds = [userUnit.id, ...childUnits.map((u) => u.id)];
+        }
+      }
+    }
+
+    // 3. Ambil data tasks periode berjalan
+    const { data: tasks, error: tasksError } = await supabase
+      .from('tasks')
+      .select('*')
+      .in('unit_id', targetUnitIds)
+      .order('deadline', { ascending: true });
+
+    if (tasksError || !tasks) {
+      setLoading(false);
+      return;
+    }
+
+    // Hitung Metrik & Tugas Kritis
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    let completedCount = 0;
+    let inProgressCount = 0;
+    let criticalCount = 0;
+    const criticalList: Task[] = [];
+
+    tasks.forEach((t) => {
+      const isCompleted = t.status === 'SELESAI';
+      const isKendala = t.status === 'TERKENDALA';
+      const isOverdueOrH3 = !isCompleted && t.deadline <= threeDaysLater;
+
+      if (isCompleted) {
+        completedCount++;
+      } else if (t.status === 'ON_PROGRESS') {
+        inProgressCount++;
+      }
+
+      if (isKendala || isOverdueOrH3) {
+        criticalCount++;
+        criticalList.push(t as Task);
+      }
+    });
+
+    setMetrics({
+      total: tasks.length,
+      completed: completedCount,
+      inProgress: inProgressCount,
+      critical: criticalCount,
+    });
+
+    setUrgentTasks(criticalList.slice(0, 5)); // 5 tugas paling mendesak
+
+    // 4. Hitung Distribusi Beban Kerja (Berdasarkan PIC Pegawai)
+    const taskIds = tasks.map((t) => t.id);
+    if (taskIds.length > 0) {
+      const { data: pics } = await supabase
+        .from('task_pics')
+        .select(`
+          user_id,
+          task_id,
+          profile:profiles(id, full_name)
+        `)
+        .in('task_id', taskIds);
+
+      if (pics && pics.length > 0) {
+        const staffMap = new Map<string, { name: string; completed: number; total: number }>();
+
+        pics.forEach((item: any) => {
+          const staffName = item.profile?.full_name || 'Pegawai';
+          const relatedTask = tasks.find((t) => t.id === item.task_id);
+          const isDone = relatedTask?.status === 'SELESAI';
+
+          if (!staffMap.has(staffName)) {
+            staffMap.set(staffName, { name: staffName, completed: 0, total: 0 });
+          }
+
+          const current = staffMap.get(staffName)!;
+          current.total++;
+          if (isDone) current.completed++;
+        });
+
+        const sortedWorkload = Array.from(staffMap.values()).sort(
+          (a, b) => b.total - a.total
+        );
+        setWorkloadData(sortedWorkload.slice(0, 5));
+      } else {
+        setWorkloadData([]);
+      }
+    } else {
+      setWorkloadData([]);
+    }
+
+    // 5. Hitung Ritme Capaian Per Bulan (Bulan 1 s.d. 8 / periode aktif)
+    const monthlyStats: { [key: number]: { total: number; completed: number } } = {};
+    for (let m = 1; m <= 8; m++) {
+      monthlyStats[m] = { total: 0, completed: 0 };
+    }
+
+    tasks.forEach((t) => {
+      const m = t.period_month || (new Date(t.deadline).getMonth() + 1);
+      if (m >= 1 && m <= 8) {
+        monthlyStats[m].total++;
+        if (t.status === 'SELESAI') monthlyStats[m].completed++;
+      }
+    });
+
+    const computedBars: ChartBarItem[] = Object.keys(monthlyStats).map((key) => {
+      const mNum = Number(key);
+      const stat = monthlyStats[mNum];
+      const pct = stat.total > 0 ? Math.round((stat.completed / stat.total) * 100) : 0;
+      return {
+        label: `B${mNum}`,
+        val: `${Math.max(pct, 8)}%`, // Nilai minimal 8% agar bar tetap tampak rapi
+      };
+    });
+
+    setChartBars(computedBars);
+    setLoading(false);
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Title & Filter Switcher */}
-      <div className="flex items-center justify-between">
+      {/* Header & Filter Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-stone-900 tracking-tight">Kinerja & Pemantauan Tusi</h1>
           <p className="text-xs text-stone-500 mt-0.5">Pemantauan progres pelaksanaan tugas berkala instansi</p>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="bg-canvas-subtle p-1 rounded-full border border-stone-200/60 flex items-center text-xs">
+        <div className="flex items-center gap-2">
+          {/* Tab Switcher Scope */}
+          <div className="bg-stone-100 p-1 rounded-full border border-stone-200/60 flex items-center text-xs">
+            <button
+              onClick={() => setFilterMode('unit')}
+              className={`px-4 py-1.5 rounded-full font-medium transition-all ${
+                filterMode === 'unit' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              Unit Saya
+            </button>
+            <button
+              onClick={() => setFilterMode('konsolidasi')}
+              className={`px-4 py-1.5 rounded-full font-medium transition-all ${
+                filterMode === 'konsolidasi' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              Konsolidasi Kanwil/KPPN
+            </button>
+          </div>
+
           <button
-            onClick={() => setFilterMode('unit')}
-            className={`px-4 py-1.5 rounded-full font-medium transition-all ${
-              filterMode === 'unit' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
-            }`}
+            onClick={fetchDashboardMetrics}
+            className="p-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-stone-500 transition-colors"
+            title="Refresh Data"
           >
-            Unit Saya
-          </button>
-          <button
-            onClick={() => setFilterMode('konsolidasi')}
-            className={`px-4 py-1.5 rounded-full font-medium transition-all ${
-              filterMode === 'konsolidasi' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
-            }`}
-          >
-            Konsolidasi Kanwil/KPPN
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-primary' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* 4 Kartu Metrik Ringkasan */}
+      {/* 4 Kartu Metrik Ringkasan (Dengan Drill-Down Link) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="Total Target Tusi" value={29} icon={ListTodo} iconColor="text-blue-500" subLabel="Target periode berjalan" />
-        <MetricCard label="Tuntas Selesai" value={18} icon={CheckCircle2} iconColor="text-emerald-500" subLabel="Tervalidasi link bukti" />
-        <MetricCard label="Dalam Pengerjaan" value={9} icon={Clock} iconColor="text-amber-500" subLabel="Rata-rata 65% progres" />
-        <MetricCard label="Terkendala / Kritis" value={2} icon={AlertTriangle} iconColor="text-primary" subLabel="Perlu perhatian atasan" />
-      </div>
-
-      {/* Baris 2: Beban Kerja Pegawai & Grafik Ritme Penyelesaian */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <WorkloadCard data={dummyWorkload} />
-
-        {/* Card Ritme / Distribusi Capaian (Sesuai Referensi Peak Ordering Time) */}
-        <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-stone-900">Ritme Penyelesaian Tugas</h4>
-            <BarChart2 className="w-4 h-4 text-stone-400" />
-          </div>
-
-          <div className="h-40 flex items-end justify-between gap-3 pt-6 px-3">
-            {chartBars.map((bar, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
-                <div
-                  className="w-full max-w-[26px] bg-blue-600 rounded-t-lg hover:bg-primary transition-all duration-200"
-                  style={{ height: bar.val }}
-                />
-                <span className="text-[10px] text-stone-400 font-mono">{bar.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Baris 3: Tabel Tugas Kritis / H-3 */}
-      <UrgentTaskTable tasks={dummyUrgentTasks} />
-    </div>
-  );
-}
+        <MetricCard 
+          label="Total Target Tusi" 
+          value={loading ? '...' : metrics.total} 
+          icon={ListTodo} 
+          iconColor="text-blue-500" 
+          subLabel="Target periode berjalan"
+          onClick={() => router.push('/tasks')}
+        />
+        <MetricCard 
+          label="Tuntas Selesai" 
+          value={loading ? '...' : metrics.completed} 
+          icon={CheckCircle2} 
+          iconColor="text-emerald-500" 
+          subLabel="Tervalidasi link bukti"
+          onClick={() => router.push('/tasks')}
+        />
+        <MetricCard 
+          label="Dalam Pengerjaan" 
+          value={loading ? '...' : metrics.inProgress} 
+          icon={Clock} 
+          iconColor="text-amber-500" 
+          subLabel="Tahapan sub-tugas aktif"
+          onClick={() => router.push('/tasks')}
+        />
+        <MetricCard 
+          label="Terkendala / Kr
