@@ -1,7 +1,17 @@
 'use client';
+
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, CheckSquare, BookOpen, Users, Building2, LogOut, ShieldCheck } from 'lucide-react';
+import { 
+  LayoutDashboard, 
+  CheckSquare, 
+  BookOpen, 
+  Users, 
+  Building2, 
+  LogOut, 
+  ShieldCheck,
+  User
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +46,12 @@ export function Sidebar() {
         { label: 'Verifikasi Pegawai', href: '/admin/approvals', icon: ShieldCheck },
         { label: 'Pegawai & Role', href: '/admin/users', icon: Users },
         { label: 'Hierarki Unit', href: '/admin/units', icon: Building2 },
+      ],
+    },
+    {
+      label: 'PENGATURAN',
+      items: [
+        { label: 'Profil Saya', href: '/profile', icon: User },
       ],
     },
   ];
