@@ -13,7 +13,8 @@ import {
   Edit3, 
   Trash2, 
   X, 
-  AlertCircle 
+  AlertCircle,
+  Clock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +28,9 @@ interface TemplateItem {
   description: string | null;
   legal_basis: string | null;
   period_type: PeriodType;
+  deadline_rule?: string | null;
+  exact_day?: number | null;
+  is_recurring?: boolean;
   created_by_unit: string;
   created_at: string;
   unit?: {
@@ -54,6 +58,8 @@ export default function TusiCatalogPage() {
   const [editTitle, setEditTitle] = useState('');
   const [editTusiType, setEditTusiType] = useState('MSKI');
   const [editPeriodType, setEditPeriodType] = useState<PeriodType>('BULANAN');
+  const [editDeadlineRule, setEditDeadlineRule] = useState('END_OF_PERIOD');
+  const [editExactDay, setEditExactDay] = useState(31);
   const [editDescription, setEditDescription] = useState('');
   const [editLegalBasis, setEditLegalBasis] = useState('');
 
@@ -63,7 +69,6 @@ export default function TusiCatalogPage() {
 
   const loadUserAndTemplates = async () => {
     setLoading(true);
-    // 1. Ambil profil pengguna yang sedang login
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: profile } = await supabase
@@ -73,8 +78,6 @@ export default function TusiCatalogPage() {
         .single();
       if (profile) setCurrentUserProfile(profile);
     }
-
-    // 2. Ambil daftar master tusi
     await fetchTemplates();
     setLoading(false);
   };
@@ -87,26 +90,25 @@ export default function TusiCatalogPage() {
     if (data) setTemplates(data as TemplateItem[]);
   };
 
-  // Cek apakah user memiliki hak mengelola (SUPER_ADMIN atau berasal dari unit pembuat)
   const canManageTemplate = (template: TemplateItem) => {
     if (!currentUserProfile) return false;
     if (currentUserProfile.role === 'SUPER_ADMIN') return true;
     return currentUserProfile.unit_id === template.created_by_unit;
   };
 
-  // Buka Modal Edit
   const openEditModal = (template: TemplateItem) => {
     setEditingTemplateId(template.id);
     setEditTitle(template.title);
     setEditTusiType(template.tusi_type || 'MSKI');
     setEditPeriodType(template.period_type || 'BULANAN');
+    setEditDeadlineRule(template.deadline_rule || 'END_OF_PERIOD');
+    setEditExactDay(template.exact_day || 31);
     setEditDescription(template.description || '');
     setEditLegalBasis(template.legal_basis || '');
     setErrorMsg('');
     setIsEditModalOpen(true);
   };
 
-  // Submit Perubahan Master Tusi
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTemplateId) return;
@@ -125,6 +127,8 @@ export default function TusiCatalogPage() {
         title: editTitle.trim(),
         tusi_type: editTusiType.trim().toUpperCase(),
         period_type: editPeriodType,
+        deadline_rule: editPeriodType === 'INSIDENTIL' ? 'MANUAL' : editDeadlineRule,
+        exact_day: editExactDay,
         description: editDescription.trim() || null,
         legal_basis: editLegalBasis.trim() || null,
       })
@@ -142,10 +146,9 @@ export default function TusiCatalogPage() {
     }
   };
 
-  // Hapus Master Tusi
   const handleDeleteTemplate = async (templateId: string, title: string) => {
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nCatatan: Tindakan ini tidak akan menghapus tugas yang sudah terlanjur dikloning pada periode aktif.`
+      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini tidak akan menghapus tugas yang sudah terlanjur dikloning pada periode aktif.`
     );
     if (!confirmed) return;
 
@@ -163,7 +166,39 @@ export default function TusiCatalogPage() {
     }
   };
 
-  // Kloning Master Tusi ke Tugas Unit Pengguna
+  // Helper kalkulasi deadline saat kloning manual
+  const calculateDeadlineForClone = (template: TemplateItem): string => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const rule = template.deadline_rule || 'END_OF_PERIOD';
+    const day = template.exact_day || 31;
+
+    let targetYear = currentYear;
+    let targetMonth = currentMonth;
+
+    if (template.period_type === 'BULANAN') {
+      if (rule === 'NEXT_MONTH_DATE') {
+        targetMonth = currentMonth + 1;
+        if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+      }
+    } else if (template.period_type === 'TRIWULANAN') {
+      const qEnd = Math.ceil(currentMonth / 3) * 3;
+      targetMonth = rule === 'NEXT_MONTH_DATE' ? qEnd + 1 : qEnd;
+      if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+    } else if (template.period_type === 'SEMESTERAN') {
+      const sEnd = currentMonth <= 6 ? 6 : 12;
+      targetMonth = rule === 'NEXT_MONTH_DATE' ? sEnd + 1 : sEnd;
+      if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+    } else if (template.period_type === 'TAHUNAN') {
+      targetMonth = 12;
+    }
+
+    const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+    const finalDay = rule === 'END_OF_PERIOD' || day >= 31 ? daysInMonth : Math.min(day, daysInMonth);
+    return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
+  };
+
   const handleCloneTask = async (template: TemplateItem) => {
     setCloningId(template.id);
     const { data: { user } } = await supabase.auth.getUser();
@@ -179,7 +214,7 @@ export default function TusiCatalogPage() {
     }
 
     const now = new Date();
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const deadlineStr = calculateDeadlineForClone(template);
 
     const { error } = await supabase.from('tasks').insert({
       unit_id: profile.unit_id,
@@ -190,7 +225,7 @@ export default function TusiCatalogPage() {
       period_type: template.period_type,
       period_month: now.getMonth() + 1,
       period_year: now.getFullYear(),
-      deadline: nextMonth.toISOString().split('T')[0],
+      deadline: deadlineStr,
       status: 'BELUM_DIKERJAKAN',
       progress_pct: 0,
       created_by: user?.id,
@@ -198,12 +233,11 @@ export default function TusiCatalogPage() {
 
     setCloningId(null);
     if (!error) {
-      setSuccessMsg(`Tusi "${template.title}" berhasil dikloning ke daftar tugas unit Anda!`);
+      setSuccessMsg(`Tusi "${template.title}" berhasil dikloning dengan batas tenggat: ${deadlineStr}!`);
       setTimeout(() => setSuccessMsg(''), 4000);
     }
   };
 
-  // Ambil list unik tusi_type untuk filter pills
   const availableTusiTypes = ['ALL', 'MSKI', 'PD', 'BANK', 'VERA', 'UMUM'];
 
   const filtered = templates.filter((t) => {
@@ -222,7 +256,7 @@ export default function TusiCatalogPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Bank Tusi & Katalog Pekerjaan</h1>
           <p className="text-xs text-stone-500 mt-1">
-            Koleksi standar tugas fungsi unit vertikal yang dapat diadopsi dan dikelola.
+            Koleksi standar tugas fungsi unit vertikal yang dapat diadopsi dan di-generate otomatis.
           </p>
         </div>
 
@@ -293,16 +327,15 @@ export default function TusiCatalogPage() {
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#DF3B68]/10 text-[#DF3B68]">
                         {t.tusi_type}
                       </span>
-                      <span className="text-[10px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-full">
                         {t.period_type}
                       </span>
                     </div>
 
-                    {/* Tombol Akses Kelola (Edit & Hapus) jika memiliki otorisasi */}
                     {hasManageAccess && (
                       <div className="flex items-center gap-1">
                         <button
@@ -333,10 +366,22 @@ export default function TusiCatalogPage() {
                   {t.legal_basis && (
                     <p className="text-[11px] text-stone-400 italic">Dasar: {t.legal_basis}</p>
                   )}
+
+                  {/* Formula Badge */}
+                  {t.period_type !== 'INSIDENTIL' && (
+                    <div className="pt-1 flex items-center gap-1 text-[10px] font-medium text-stone-500">
+                      <Clock className="w-3 h-3 text-[#DF3B68]" />
+                      <span>
+                        {t.deadline_rule === 'END_OF_PERIOD'
+                          ? 'Batas: Akhir Periode'
+                          : `Batas: Tgl ${t.exact_day === 31 ? 'Akhir Bulan' : t.exact_day} (${t.deadline_rule === 'NEXT_MONTH_DATE' ? 'M+1' : 'Bulan Berjalan'})`}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-3 border-t border-stone-100 flex items-center justify-between">
-                  <span className="text-[10px] text-stone-400 truncate max-w-[140px]" title={t.unit?.name ?? 'Pusat'}>
+                  <span className="text-[10px] text-stone-400 truncate max-w-[130px]" title={t.unit?.name ?? 'Pusat'}>
                     Oleh: {t.unit?.name ?? 'Pusat'}
                   </span>
                   <button
@@ -357,7 +402,7 @@ export default function TusiCatalogPage() {
       {/* Modal Form Edit Master Tusi */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-primary" />
@@ -383,7 +428,6 @@ export default function TusiCatalogPage() {
             <form onSubmit={handleEditSubmit} className="space-y-4">
               <Input
                 label="Judul Tugas / Master Tusi *"
-                placeholder="Contoh: Rekonsiliasi Laporan Keuangan UAKPA"
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
                 required
@@ -396,7 +440,6 @@ export default function TusiCatalogPage() {
                     type="text"
                     value={editTusiType}
                     onChange={(e) => setEditTusiType(e.target.value)}
-                    placeholder="MSKI, PD, VERA, dsb."
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 uppercase focus:outline-none focus:ring-2 focus:ring-primary/20"
                     required
                   />
@@ -418,11 +461,49 @@ export default function TusiCatalogPage() {
                 </div>
               </div>
 
+              {/* Aturan Formula Batas Edit */}
+              {editPeriodType !== 'INSIDENTIL' && (
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
+                  <span className="text-xs font-bold text-stone-800 block">Formula Batas Tenggat Siklus:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-stone-500 mb-0.5">Ketentuan:</label>
+                      <select
+                        value={editDeadlineRule}
+                        onChange={(e) => setEditDeadlineRule(e.target.value)}
+                        className="w-full p-2 rounded-lg border border-stone-200 bg-white text-xs"
+                      >
+                        <option value="END_OF_PERIOD">Akhir Periode</option>
+                        <option value="NEXT_MONTH_DATE">Bulan Berikutnya (M+1)</option>
+                        <option value="SAME_MONTH_DATE">Bulan Berjalan</option>
+                      </select>
+                    </div>
+
+                    {editDeadlineRule !== 'END_OF_PERIOD' && (
+                      <div>
+                        <label className="block text-[10px] text-stone-500 mb-0.5">Tanggal:</label>
+                        <select
+                          value={editExactDay}
+                          onChange={(e) => setEditExactDay(Number(e.target.value))}
+                          className="w-full p-2 rounded-lg border border-stone-200 bg-white text-xs"
+                        >
+                          <option value={31}>Akhir Bulan</option>
+                          <option value={5}>Tgl 5</option>
+                          <option value={10}>Tgl 10</option>
+                          <option value={15}>Tgl 15</option>
+                          <option value={20}>Tgl 20</option>
+                          <option value={25}>Tgl 25</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1 text-left">
                 <label className="block text-xs font-semibold text-stone-600">Dasar Hukum (Opsional)</label>
                 <input
                   type="text"
-                  placeholder="Contoh: PER-5/PB/2024 atau PMK 210/2022"
                   value={editLegalBasis}
                   onChange={(e) => setEditLegalBasis(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -430,10 +511,9 @@ export default function TusiCatalogPage() {
               </div>
 
               <div className="space-y-1 text-left">
-                <label className="block text-xs font-semibold text-stone-600">Deskripsi / Uraian Detail (Opsional)</label>
+                <label className="block text-xs font-semibold text-stone-600">Deskripsi / Prosedur (Opsional)</label>
                 <textarea
                   rows={3}
-                  placeholder="Uraian prosedur pelaksanaan tusi..."
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   className="w-full p-3 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
