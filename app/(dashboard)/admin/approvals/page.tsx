@@ -1,4 +1,5 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -29,12 +30,30 @@ export default function ApprovalsPage() {
 
   const handleAction = async (id: string, action: 'APPROVED' | 'REJECTED') => {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('profiles').update({
-      approval_status: action,
-      approved_by: user?.id,
-    }).eq('id', id);
 
-    setPendingList(prev => prev.filter(item => item.id !== id));
+    // 1. Update status verifikasi akun pegawai
+    await supabase
+      .from('profiles')
+      .update({
+        approval_status: action,
+        approved_by: user?.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+
+    // 2. [BACKLOG-1] Buat entri notifikasi ke pegawai yang bersangkutan
+    await supabase.from('notifications').insert({
+      user_id: id,
+      title: action === 'APPROVED' ? '✅ Akun Dinas Telah Disetujui' : '❌ Verifikasi Akun Ditolak',
+      message:
+        action === 'APPROVED'
+          ? 'Selamat! Pendaftaran akun Anda telah disetujui oleh atasan unit. Anda sekarang memiliki hak akses penuh ke aplikasi.'
+          : 'Mohon maaf, permohonan pendaftaran akun Anda ditolak oleh atasan unit. Silakan hubungi admin unit kerja Anda.',
+      action_link: action === 'APPROVED' ? '/dashboard' : '/pending',
+      is_read: false,
+    });
+
+    setPendingList((prev) => prev.filter((item) => item.id !== id));
   };
 
   return (
@@ -69,7 +88,11 @@ export default function ApprovalsPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleAction(pegawai.id, 'REJECTED')}>
+                  <Button 
+                    variant="outline" 
+                    className="text-red-600 border-red-200 hover:bg-red-50" 
+                    onClick={() => handleAction(pegawai.id, 'REJECTED')}
+                  >
                     <X className="w-4 h-4 mr-1" /> Tolak
                   </Button>
                   <Button onClick={() => handleAction(pegawai.id, 'APPROVED')}>
