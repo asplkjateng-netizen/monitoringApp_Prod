@@ -94,7 +94,15 @@ export default function EditTaskPage() {
     setErrorMessage('');
 
     try {
-      // 1. Update data pokok task
+      // 1. Dapatkan daftar PIC eksisting sebelum diubah untuk perbandingan mutasi
+      const { data: existingPicsData } = await supabase
+        .from('task_pics')
+        .select('user_id')
+        .eq('task_id', taskId);
+      
+      const previousPicIds = (existingPicsData || []).map((p) => p.user_id);
+
+      // 2. Update data pokok task
       const { error: taskError } = await supabase
         .from('tasks')
         .update({
@@ -112,7 +120,7 @@ export default function EditTaskPage() {
 
       if (taskError) throw taskError;
 
-      // 2. Update Relasi Multi-PIC (Hapus lama, masukkan baru)
+      // 3. Update Relasi Multi-PIC (Hapus lama, masukkan baru)
       await supabase.from('task_pics').delete().eq('task_id', taskId);
 
       if (selectedPics.length > 0) {
@@ -121,6 +129,19 @@ export default function EditTaskPage() {
           user_id: uid,
         }));
         await supabase.from('task_pics').insert(picPayloads);
+
+        // [BACKLOG-1] Notifikasi khusus untuk PIC baru yang ditambahkan
+        const newlyAddedPics = selectedPics.filter((id) => !previousPicIds.includes(id));
+        if (newlyAddedPics.length > 0) {
+          const notifs = newlyAddedPics.map((uid) => ({
+            user_id: uid,
+            title: '📋 Penugasan PIC Tugas',
+            message: `Anda baru saja ditambahkan sebagai PIC pada tugas: "${title.trim()}". Batas tenggat: ${deadline}.`,
+            action_link: `/tasks/${taskId}`,
+            is_read: false,
+          }));
+          await supabase.from('notifications').insert(notifs);
+        }
       }
 
       router.push(`/tasks/${taskId}`);
