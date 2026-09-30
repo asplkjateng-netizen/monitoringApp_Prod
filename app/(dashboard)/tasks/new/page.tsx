@@ -251,13 +251,24 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan Multi-PIC
+      // 3. Simpan Multi-PIC & Picu Notifikasi Penugasan
       if (selectedPics.length > 0) {
         const picPayloads = selectedPics.map((picUserId) => ({
           task_id: taskId,
           user_id: picUserId,
         }));
         await supabase.from('task_pics').insert(picPayloads);
+
+        // [BACKLOG-1] Notifikasi In-App ke seluruh PIC Pelaksana
+        const notifPayloads = selectedPics.map((picUserId) => ({
+          user_id: picUserId,
+          title: '📋 Penugasan Tugas Baru',
+          message: `Anda ditetapkan sebagai PIC untuk pekerjaan: "${title.trim()}". Batas tenggat: ${deadline}.`,
+          action_link: `/tasks/${taskId}`,
+          is_read: false,
+        }));
+
+        await supabase.from('notifications').insert(notifPayloads);
       }
 
       // 4. Simpan Subtasks jika ada
