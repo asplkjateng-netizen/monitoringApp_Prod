@@ -1,8 +1,9 @@
 'use client';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Clock } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,12 @@ export default function NewTusiPage() {
   const [periodType, setPeriodType] = useState<PeriodType>('BULANAN');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
+
+  // Aturan Siklus Formula
+  const [deadlineRule, setDeadlineRule] = useState<string>('END_OF_PERIOD');
+  const [exactDay, setExactDay] = useState<number>(31);
+  const [isRecurring, setIsRecurring] = useState<boolean>(true);
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -39,11 +46,14 @@ export default function NewTusiPage() {
     }
 
     const { error } = await supabase.from('task_templates').insert({
-      title,
+      title: title.trim(),
       tusi_type: tusiType,
       period_type: periodType,
-      description,
-      legal_basis: legalBasis,
+      description: description.trim() || null,
+      legal_basis: legalBasis.trim() || null,
+      deadline_rule: periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
+      exact_day: exactDay,
+      is_recurring: periodType !== 'INSIDENTIL' ? isRecurring : false,
       created_by_unit: profile.unit_id,
     });
 
@@ -69,7 +79,7 @@ export default function NewTusiPage() {
             Master Bank Data
           </span>
           <h1 className="text-xl font-bold text-stone-900 mt-2">Buat Master Template Tusi</h1>
-          <p className="text-xs text-stone-500 mt-1">Daftarkan standar tugas agar bisa diadopsi oleh seksi sejenis</p>
+          <p className="text-xs text-stone-500 mt-1">Daftarkan standar tugas agar bisa diadopsi oleh seksi sejenis dan dibangkitkan otomatis</p>
         </div>
 
         {errorMsg && (
@@ -77,7 +87,13 @@ export default function NewTusiPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Judul Tugas / Tusi" placeholder="Misal: Rekonsiliasi Laporan Keuangan UAKPA" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <Input 
+            label="Judul Tugas / Tusi *" 
+            placeholder="Misal: Telaah Laporan Keuangan BLU" 
+            value={title} 
+            onChange={(e) => setTitle(e.target.value)} 
+            required 
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -107,6 +123,61 @@ export default function NewTusiPage() {
             </div>
           </div>
 
+          {/* Pengaturan Formula Tenggat Siklus */}
+          {periodType !== 'INSIDENTIL' && (
+            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/80 space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                <Clock className="w-4 h-4 text-primary" />
+                <span>Aturan Batas Tenggat Waktu Siklus</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">Formula Batas:</label>
+                  <select
+                    value={deadlineRule}
+                    onChange={(e) => setDeadlineRule(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                  >
+                    <option value="END_OF_PERIOD">Tepat di Akhir Periode (Contoh: TW I = 31 Maret)</option>
+                    <option value="NEXT_MONTH_DATE">Bulan Berikutnya (M+1)</option>
+                    <option value="SAME_MONTH_DATE">Bulan Berjalan</option>
+                  </select>
+                </div>
+
+                {deadlineRule !== 'END_OF_PERIOD' && (
+                  <div>
+                    <label className="block text-[11px] font-medium text-stone-600 mb-1">Batas Tanggal:</label>
+                    <select
+                      value={exactDay}
+                      onChange={(e) => setExactDay(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                    >
+                      <option value={31}>Akhir Bulan</option>
+                      <option value={5}>Tanggal 5</option>
+                      <option value={10}>Tanggal 10</option>
+                      <option value={15}>Tanggal 15</option>
+                      <option value={20}>Tanggal 20</option>
+                      <option value={25}>Tanggal 25</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  className="rounded text-primary focus:ring-primary w-3.5 h-3.5"
+                />
+                <span className="text-xs text-stone-700 font-medium">
+                  Aktifkan otomasi generate tugas oleh sistem setiap awal siklus
+                </span>
+              </label>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-semibold text-stone-600 mb-1">Deskripsi / Prosedur Ringkas</label>
             <textarea
@@ -118,7 +189,12 @@ export default function NewTusiPage() {
             />
           </div>
 
-          <Input label="Dasar Hukum / Regulasi" placeholder="Misal: Perdirjen Perbendaharaan No. PER-5/PB/2023" value={legalBasis} onChange={(e) => setLegalBasis(e.target.value)} />
+          <Input 
+            label="Dasar Hukum / Regulasi" 
+            placeholder="Misal: Perdirjen Perbendaharaan No. PER-5/PB/2024" 
+            value={legalBasis} 
+            onChange={(e) => setLegalBasis(e.target.value)} 
+          />
 
           <div className="pt-2">
             <Button type="submit" isLoading={loading} className="w-full">
