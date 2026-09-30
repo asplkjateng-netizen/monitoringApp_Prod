@@ -221,6 +221,8 @@ export default function TaskDetailPage() {
       return;
     }
 
+    const isNewlyTerkendala = currentStatus === 'TERKENDALA' && task.status !== 'TERKENDALA';
+
     const { error } = await supabase
       .from('tasks')
       .update({
@@ -237,6 +239,38 @@ export default function TaskDetailPage() {
     if (error) {
       setErrorMsg('Gagal menyimpan perubahan: ' + error.message);
     } else {
+      // [BACKLOG-1] Otomasi Notifikasi Status Terkendala
+      if (isNewlyTerkendala) {
+        try {
+          // Cari atasan unit (KEPALA_SEKSI, KEPALA_UNIT, SUPER_ADMIN)
+          const { data: leaders } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('unit_id', task.unit_id)
+            .in('role', ['KEPALA_SEKSI', 'KEPALA_UNIT', 'SUPER_ADMIN']);
+
+          const targetUserIds = new Set<string>();
+          if (leaders) leaders.forEach((l) => targetUserIds.add(l.id));
+          if (task.created_by) targetUserIds.add(task.created_by);
+
+          // Masukkan juga seluruh PIC pelaksana agar saling terkoordinasi
+          pics.forEach((p) => targetUserIds.add(p.id));
+
+          if (targetUserIds.size > 0) {
+            const notifPayloads = Array.from(targetUserIds).map((uid) => ({
+              user_id: uid,
+              title: `⚠️ Pekerjaan Terkendala: ${task.title}`,
+              message: `Pekerjaan dilaporkan terkendala: "${kendalaInput.trim()}". Perlu arahan atau koordinasi penyelesaian.`,
+              action_link: `/tasks/${taskId}`,
+              is_read: false,
+            }));
+            await supabase.from('notifications').insert(notifPayloads);
+          }
+        } catch (notifErr) {
+          console.warn('Gagal memicu notifikasi kendala:', notifErr);
+        }
+      }
+
       setSuccessMsg(`Status tugas berhasil diperbarui ke "${currentStatus}"!`);
       setManualNotice('');
       setTimeout(() => setSuccessMsg(''), 4000);
