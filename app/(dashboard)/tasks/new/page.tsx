@@ -7,13 +7,14 @@ import {
   ArrowLeft, 
   Plus, 
   Trash2, 
-  Calendar, 
   Users, 
   CheckCircle2, 
   FileText, 
   Sparkles,
   AlertCircle,
-  BookmarkPlus
+  BookmarkPlus,
+  Clock,
+  CalendarCheck2
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,8 @@ interface TaskTemplate {
   description: string | null;
   legal_basis: string | null;
   period_type: 'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL';
+  deadline_rule?: string;
+  exact_day?: number;
 }
 
 export default function NewTaskPage() {
@@ -53,17 +56,16 @@ export default function NewTaskPage() {
 
   // State Form Pokok
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(false);
+  const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(true);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
   const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('BULANAN');
-  const [periodMonth, setPeriodMonth] = useState<number>(new Date().getMonth() + 1);
-  const [periodYear, setPeriodYear] = useState<number>(new Date().getFullYear());
   
-  // Pengaturan Deadline Klerikal vs Insidentil
-  const [cutoffDay, setCutoffDay] = useState<number>(15);
-  const [cutoffTiming, setCutoffTiming] = useState<'SAME_MONTH' | 'NEXT_MONTH'>('NEXT_MONTH');
+  // Aturan Siklus & Deadline
+  const [deadlineRule, setDeadlineRule] = useState<'END_OF_PERIOD' | 'NEXT_MONTH_DATE' | 'SAME_MONTH_DATE'>('END_OF_PERIOD');
+  const [exactDay, setExactDay] = useState<number>(31);
+  const [customDayInput, setCustomDayInput] = useState<string>('31');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState<'TINGGI' | 'SEDANG' | 'RENDAH'>('SEDANG');
 
@@ -75,28 +77,79 @@ export default function NewTaskPage() {
     fetchInitialData();
   }, []);
 
-  // Hitung otomatis deadline saat tipe periode / cut-off berubah
+  // Hitung otomatis deadline berdasarkan formula siklus
   useEffect(() => {
     if (periodType !== 'INSIDENTIL') {
-      calculateClericalDeadline();
+      calculateRecurringDeadline();
     }
-  }, [periodType, periodMonth, periodYear, cutoffDay, cutoffTiming]);
+  }, [periodType, deadlineRule, exactDay]);
 
-  const calculateClericalDeadline = () => {
-    let targetYear = periodYear;
-    let targetMonth = periodMonth; // 1-12
+  const calculateRecurringDeadline = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-12
 
-    if (cutoffTiming === 'NEXT_MONTH') {
-      targetMonth += 1;
-      if (targetMonth > 12) {
+    let targetYear = currentYear;
+    let targetMonth = currentMonth;
+
+    if (periodType === 'BULANAN') {
+      if (deadlineRule === 'END_OF_PERIOD' || deadlineRule === 'SAME_MONTH_DATE') {
+        targetMonth = currentMonth;
+      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+        targetMonth = currentMonth + 1;
+        if (targetMonth > 12) {
+          targetMonth = 1;
+          targetYear += 1;
+        }
+      }
+    } else if (periodType === 'TRIWULANAN') {
+      // Tentukan bulan penutup TW (TW1: 3, TW2: 6, TW3: 9, TW4: 12)
+      const currentQuarter = Math.ceil(currentMonth / 3);
+      const quarterEndMonth = currentQuarter * 3;
+
+      if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = quarterEndMonth;
+      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+        targetMonth = quarterEndMonth + 1;
+        if (targetMonth > 12) {
+          targetMonth = 1;
+          targetYear += 1;
+        }
+      } else {
+        targetMonth = currentMonth;
+      }
+    } else if (periodType === 'SEMESTERAN') {
+      // Tentukan bulan penutup Semester (Sem1: 6, Sem2: 12)
+      const semesterEndMonth = currentMonth <= 6 ? 6 : 12;
+
+      if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = semesterEndMonth;
+      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+        targetMonth = semesterEndMonth + 1;
+        if (targetMonth > 12) {
+          targetMonth = 1;
+          targetYear += 1;
+        }
+      } else {
+        targetMonth = currentMonth;
+      }
+    } else if (periodType === 'TAHUNAN') {
+      if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = 12;
+      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
         targetMonth = 1;
         targetYear += 1;
       }
     }
 
-    // Pastikan tanggal valid di bulan tersebut
+    // Hitung tanggal akhir di bulan target
     const daysInTargetMonth = new Date(targetYear, targetMonth, 0).getDate();
-    const effectiveDay = Math.min(cutoffDay, daysInTargetMonth);
+    let effectiveDay = exactDay;
+    if (deadlineRule === 'END_OF_PERIOD' || exactDay >= 31) {
+      effectiveDay = daysInTargetMonth;
+    } else {
+      effectiveDay = Math.min(exactDay, daysInTargetMonth);
+    }
 
     const formattedMonth = String(targetMonth).padStart(2, '0');
     const formattedDay = String(effectiveDay).padStart(2, '0');
@@ -114,7 +167,6 @@ export default function NewTaskPage() {
 
     setUserId(user.id);
 
-    // Ambil profil user, unit_id, dan tusi_type
     const { data: profile } = await supabase
       .from('profiles')
       .select('unit_id, unit:units(id, tusi_type)')
@@ -126,7 +178,6 @@ export default function NewTaskPage() {
       const tusi = (profile.unit as any)?.tusi_type || 'UMUM';
       setUserTusiType(tusi);
 
-      // Ambil staf aktif
       const { data: staff } = await supabase
         .from('profiles')
         .select('id, full_name, nip, role')
@@ -139,10 +190,9 @@ export default function NewTaskPage() {
         setSelectedPics([user.id]);
       }
 
-      // Ambil Master Template Bank Tusi
       const { data: tpl } = await supabase
         .from('task_templates')
-        .select('id, title, description, legal_basis, period_type')
+        .select('*')
         .order('title', { ascending: true });
 
       if (tpl) setTemplates(tpl);
@@ -161,6 +211,13 @@ export default function NewTaskPage() {
       setDescription(tpl.description || '');
       setLegalBasis(tpl.legal_basis || '');
       setPeriodType(tpl.period_type);
+      if (tpl.deadline_rule) {
+        setDeadlineRule(tpl.deadline_rule as any);
+      }
+      if (tpl.exact_day) {
+        setExactDay(tpl.exact_day);
+        setCustomDayInput(String(tpl.exact_day));
+      }
     }
   };
 
@@ -193,7 +250,7 @@ export default function NewTaskPage() {
       return;
     }
     if (!deadline) {
-      setErrorMessage('Tenggat waktu (deadline) wajib ditentukan.');
+      setErrorMessage('Tenggat waktu wajib ditentukan.');
       return;
     }
 
@@ -201,9 +258,10 @@ export default function NewTaskPage() {
 
     try {
       let createdTemplateId = selectedTemplateId || null;
+      const now = new Date();
 
-      // 1. Simpan ke Bank Template jika opsi dicentang
-      if (saveAsTemplate) {
+      // 1. Simpan ke Bank Template jika opsi dicentang atau tugas berulang
+      if (saveAsTemplate || (periodType !== 'INSIDENTIL' && !createdTemplateId)) {
         const { data: newTpl, error: tplError } = await supabase
           .from('task_templates')
           .insert({
@@ -212,19 +270,20 @@ export default function NewTaskPage() {
             description: description.trim() || null,
             legal_basis: legalBasis.trim() || null,
             period_type: periodType,
+            deadline_rule: periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
+            exact_day: exactDay,
+            is_recurring: periodType !== 'INSIDENTIL',
             created_by_unit: unitId
           })
           .select('id')
           .single();
 
-        if (tplError) {
-          console.warn('Gagal menyimpan template master:', tplError.message);
-        } else if (newTpl) {
+        if (!tplError && newTpl) {
           createdTemplateId = newTpl.id;
         }
       }
 
-      // 2. Simpan Task Utama
+      // 2. Simpan Tugas Periode Berjalan
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -234,8 +293,8 @@ export default function NewTaskPage() {
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
           period_type: periodType,
-          period_month: periodMonth,
-          period_year: periodYear,
+          period_month: now.getMonth() + 1,
+          period_year: now.getFullYear(),
           deadline,
           priority,
           status: 'BELUM_DIKERJAKAN',
@@ -251,7 +310,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan Multi-PIC & Picu Notifikasi Penugasan
+      // 3. Simpan PIC & Buat Notifikasi Penugasan
       if (selectedPics.length > 0) {
         const picPayloads = selectedPics.map((picUserId) => ({
           task_id: taskId,
@@ -259,19 +318,17 @@ export default function NewTaskPage() {
         }));
         await supabase.from('task_pics').insert(picPayloads);
 
-        // [BACKLOG-1] Notifikasi In-App ke seluruh PIC Pelaksana
         const notifPayloads = selectedPics.map((picUserId) => ({
           user_id: picUserId,
           title: '📋 Penugasan Tugas Baru',
-          message: `Anda ditetapkan sebagai PIC untuk pekerjaan: "${title.trim()}". Batas tenggat: ${deadline}.`,
+          message: `Anda ditetapkan sebagai PIC untuk: "${title.trim()}". Batas tenggat: ${deadline}.`,
           action_link: `/tasks/${taskId}`,
           is_read: false,
         }));
-
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks jika ada
+      // 4. Simpan Subtasks
       const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
@@ -280,14 +337,7 @@ export default function NewTaskPage() {
           is_completed: false,
           evidence_link_type: 'INHERIT',
         }));
-
-        const { error: subtaskError } = await supabase
-          .from('subtasks')
-          .insert(subtaskPayloads);
-
-        if (subtaskError) {
-          console.error('Error saat menyimpan subtasks:', subtaskError);
-        }
+        await supabase.from('subtasks').insert(subtaskPayloads);
       }
 
       router.push('/tasks');
@@ -314,7 +364,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan realisasi tugas unit kerja, tentukan batas tenggat, Multi-PIC, dan tahapan sub-pekerjaan.
+            Daftarkan tugas klerikal rutin berkala atau pekerjaan insidentil unit kerja.
           </p>
         </div>
       </div>
@@ -327,18 +377,18 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Card 1: Import dari Katalog Tusi */}
+        {/* Template Selector */}
         <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
             <Sparkles className="w-4 h-4 text-[#DF3B68]" />
-            <span>Gunakan Master Template Bank Tusi (Opsional)</span>
+            <span>Pilih dari Master Bank Tusi (Opsional)</span>
           </div>
           <select
             value={selectedTemplateId}
             onChange={(e) => handleSelectTemplate(e.target.value)}
             className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-stone-50/50 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
           >
-            <option value="">-- Buat Tugas Mandiri (Tanpa Template) --</option>
+            <option value="">-- Buat Tugas Mandiri Baru --</option>
             {templates.map((tpl) => (
               <option key={tpl.id} value={tpl.id}>
                 {tpl.title} ({tpl.period_type})
@@ -347,40 +397,45 @@ export default function NewTaskPage() {
           </select>
         </div>
 
-        {/* Card 2: Informasi Pokok Pekerjaan & Deadline Klerikal */}
+        {/* Informasi Pokok & Formula Siklus */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
               <FileText className="w-4 h-4 text-[#DF3B68]" />
               <span>Rincian Informasi Tugas</span>
             </div>
-            {/* Checkbox Simpan ke Bank Template */}
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl transition-colors">
-              <input
-                type="checkbox"
-                checked={saveAsTemplate}
-                onChange={(e) => setSaveAsTemplate(e.target.checked)}
-                className="w-3.5 h-3.5 rounded text-[#DF3B68] focus:ring-[#DF3B68]"
-              />
-              <BookmarkPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
-              <span>Simpan ke Bank Template Tusi</span>
-            </label>
+            {periodType !== 'INSIDENTIL' ? (
+              <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
+                Otomasi Pembangkitan Rutin Aktif
+              </span>
+            ) : (
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl">
+                <input
+                  type="checkbox"
+                  checked={saveAsTemplate}
+                  onChange={(e) => setSaveAsTemplate(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-[#DF3B68] focus:ring-[#DF3B68]"
+                />
+                <BookmarkPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Simpan ke Bank Tusi</span>
+              </label>
+            )}
           </div>
 
           <div className="space-y-4">
             <Input
               label="Judul / Uraian Tugas *"
-              placeholder="Contoh: Rekonsiliasi Laporan Keuangan dan LPJ Bendahara"
+              placeholder="Contoh: Telaah Laporan Keuangan BLU Triwulan I"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
             />
 
             <div className="space-y-1 text-left">
-              <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Peraturan</label>
+              <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Regulasi</label>
               <input
                 type="text"
-                placeholder="Contoh: PER-56/PB/2016, Nota Dinas Terkait"
+                placeholder="Contoh: PER-5/PB/2024, ND Dit. APK"
                 value={legalBasis}
                 onChange={(e) => setLegalBasis(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
@@ -391,7 +446,7 @@ export default function NewTaskPage() {
               <label className="block text-xs font-semibold text-stone-600">Deskripsi / Petunjuk Teknis</label>
               <textarea
                 rows={3}
-                placeholder="Rincian output tugas..."
+                placeholder="Rincian prosedur teknis pelaksanaan..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 resize-none"
@@ -399,85 +454,116 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus Periode & Deadline Klerikal */}
-          <div className="bg-stone-50/70 p-4 rounded-2xl border border-stone-100 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Konfigurasi Tipe Siklus & Aturan Batas */}
+          <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">Tipe Periode</label>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">Jenis Siklus Pekerjaan *</label>
                 <select
                   value={periodType}
                   onChange={(e) => setPeriodType(e.target.value as any)}
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800 focus:ring-2 focus:ring-[#DF3B68]/20"
                 >
-                  <option value="BULANAN">Bulanan</option>
-                  <option value="TRIWULANAN">Triwulanan</option>
-                  <option value="SEMESTERAN">Semesteran</option>
+                  <option value="BULANAN">Bulanan (Klerikal Rutin)</option>
+                  <option value="TRIWULANAN">Triwulanan (TW I s.d. TW IV)</option>
+                  <option value="SEMESTERAN">Semesteran (Semester I & II)</option>
                   <option value="TAHUNAN">Tahunan</option>
-                  <option value="INSIDENTIL">Insidentil (Bebas)</option>
+                  <option value="INSIDENTIL">Insidentil (Tugas Ad-Hoc / Sekali Jalan)</option>
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">Periode Bulan & Tahun</label>
-                <div className="flex gap-2">
-                  <select
-                    value={periodMonth}
-                    onChange={(e) => setPeriodMonth(Number(e.target.value))}
-                    className="w-1/2 px-2 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <option key={i + 1} value={i + 1}>Bulan {i + 1}</option>
-                    ))}
-                  </select>
+              {/* Jika Insidentil, Tampilkan Input Tenggat Manual */}
+              {periodType === 'INSIDENTIL' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Tenggat Waktu Pekerjaan *</label>
                   <input
-                    type="number"
-                    value={periodYear}
-                    onChange={(e) => setPeriodYear(Number(e.target.value))}
-                    className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800"
+                    type="date"
+                    value={deadline}
+                    onChange={(e) => setDeadline(e.target.value)}
+                    required
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-mono font-medium"
                   />
                 </div>
-              </div>
-
-              {/* Deadline Logic */}
-              <div>
-                <label className="block text-xs font-semibold text-stone-600 mb-1">
-                  {periodType === 'INSIDENTIL' ? 'Tenggat Waktu *' : 'Tenggat Waktu Terkalkulasi'}
-                </label>
-                <input
-                  type="date"
-                  value={deadline}
-                  onChange={(e) => setDeadline(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
-                />
-              </div>
+              ) : (
+                /* Pratinjau Tenggat Siklus Aktif */
+                <div className="p-3 bg-white rounded-xl border border-stone-200 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-stone-400 font-semibold block uppercase">Tenggat Periode Berjalan</span>
+                    <span className="text-xs font-mono font-bold text-stone-800">{deadline || '-'}</span>
+                  </div>
+                  <CalendarCheck2 className="w-5 h-5 text-emerald-600" />
+                </div>
+              )}
             </div>
 
-            {/* Aturan Khusus Klerikal (Bulanan, Triwulanan, Semesteran, Tahunan) */}
+            {/* Aturan Formula Batas Waktu untuk Tugas Klerikal */}
             {periodType !== 'INSIDENTIL' && (
-              <div className="pt-2 border-t border-stone-200/60 flex flex-wrap items-center gap-3 text-xs text-stone-600">
-                <span className="font-semibold text-stone-700">Aturan Siklus: Batas Tanggal</span>
-                <select
-                  value={cutoffDay}
-                  onChange={(e) => setCutoffDay(Number(e.target.value))}
-                  className="px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium"
-                >
-                  {[5, 10, 15, 20, 25, 31].map((d) => (
-                    <option key={d} value={d}>Tanggal {d === 31 ? 'Akhir Bulan' : d}</option>
-                  ))}
-                </select>
-                <span>pada</span>
-                <select
-                  value={cutoffTiming}
-                  onChange={(e) => setCutoffTiming(e.target.value as any)}
-                  className="px-2.5 py-1 rounded-lg border border-stone-200 bg-white text-xs font-medium"
-                >
-                  <option value="NEXT_MONTH">Bulan Berikutnya (M+1)</option>
-                  <option value="SAME_MONTH">Bulan Berjalan</option>
-                </select>
-                <span className="text-stone-400 text-[11px] italic">
-                  (Otomatis menghitung tanggal tenggat: {deadline})
-                </span>
+              <div className="pt-3 border-t border-stone-200/60 space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                  <Clock className="w-4 h-4 text-[#DF3B68]" />
+                  <span>Formula Batas Waktu Siklus (Dihitung Otomatis Setiap Awal Periode):</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-stone-600 mb-1">Ketentuan Batas:</label>
+                    <select
+                      value={deadlineRule}
+                      onChange={(e) => setDeadlineRule(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                    >
+                      <option value="END_OF_PERIOD">Tepat di Akhir Periode (Contoh: LK BLU TW I = Akhir Maret)</option>
+                      <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
+                      <option value="SAME_MONTH_DATE">Bulan Berjalan</option>
+                    </select>
+                  </div>
+
+                  {deadlineRule !== 'END_OF_PERIOD' && (
+                    <div>
+                      <label className="block text-[11px] font-medium text-stone-600 mb-1">Tanggal Cut-off:</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
+                          onChange={(e) => {
+                            if (e.target.value === 'CUSTOM') {
+                              setExactDay(1);
+                            } else {
+                              const val = Number(e.target.value);
+                              setExactDay(val);
+                              setCustomDayInput(String(val));
+                            }
+                          }}
+                          className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                        >
+                          <option value="31">Akhir Bulan</option>
+                          <option value="5">Tanggal 5</option>
+                          <option value="10">Tanggal 10</option>
+                          <option value="15">Tanggal 15</option>
+                          <option value="20">Tanggal 20</option>
+                          <option value="25">Tanggal 25</option>
+                          <option value="CUSTOM">Manual / Bebas</option>
+                        </select>
+
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          placeholder="Tgl 1-31"
+                          value={customDayInput}
+                          onChange={(e) => {
+                            setCustomDayInput(e.target.value);
+                            const val = Number(e.target.value);
+                            if (val >= 1 && val <= 31) setExactDay(val);
+                          }}
+                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-500 italic">
+                  * Tugas akan didaftarkan untuk periode berjalan sekarang, dan sistem akan otomatis membangkitkan tugas ini kembali pada setiap awal siklus periode berikutnya.
+                </p>
               </div>
             )}
           </div>
@@ -509,7 +595,7 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* Card 3: Multi-PIC */}
+        {/* Multi-PIC */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -545,7 +631,7 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* Card 4: Sub-Pekerjaan Awal */}
+        {/* Sub-Pekerjaan Awal */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
