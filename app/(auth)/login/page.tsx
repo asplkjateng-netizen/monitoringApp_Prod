@@ -62,6 +62,7 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)} 
             required 
           />
+
           <div>
             <Input 
               label="Password" 
@@ -71,10 +72,10 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)} 
               required 
             />
-            <div className="flex justify-end mt-1.5">
+            <div className="flex justify-end mt-2">
               <Link 
                 href="/forgot-password" 
-                className="text-[11px] font-medium text-stone-500 hover:text-primary transition-colors"
+                className="text-[11px] font-medium text-stone-500 hover:text-primary transition-colors cursor-pointer"
               >
                 Lupa kata sandi?
               </Link>
@@ -88,7 +89,7 @@ export default function LoginPage() {
 
         <p className="text-center text-xs text-stone-500 mt-6">
           Belum terdaftar?{' '}
-          <Link href="/register" className="text-primary font-semibold hover:underline">
+          <Link href="/register" className="text-primary font-semibold hover:underline cursor-pointer">
             Daftar akun baru
           </Link>
         </p>
