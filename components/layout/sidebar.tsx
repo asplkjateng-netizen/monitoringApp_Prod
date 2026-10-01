@@ -10,7 +10,8 @@ import {
   Building2, 
   LogOut, 
   ShieldCheck,
-  User
+  User,
+  FileSpreadsheet
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
@@ -32,6 +33,7 @@ export function Sidebar() {
       items: [
         { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
         { label: 'Daftar Tugas', href: '/tasks', icon: CheckSquare },
+        { label: 'Laporan & Riwayat', href: '/reports', icon: FileSpreadsheet },
       ],
     },
     {
@@ -57,7 +59,7 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="w-64 min-h-screen bg-canvas border-r border-stone-200/60 p-5 flex flex-col justify-between">
+    <aside className="w-64 min-h-screen bg-canvas border-r border-stone-200/60 p-5 flex flex-col justify-between print:hidden">
       <div className="space-y-6">
         {/* Logo & Info */}
         <div className="flex items-center gap-3 px-2">
