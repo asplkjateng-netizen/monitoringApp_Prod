@@ -2,12 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { 
   CheckCircle2, 
   Clock, 
   AlertTriangle, 
   ListTodo, 
-  RefreshCw 
+  RefreshCw,
+  Building2,
+  ShieldCheck,
+  TrendingUp,
+  UserCheck,
+  ChevronRight,
+  Eye
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { MetricCard } from '@/components/dashboard/metric-card';
@@ -15,15 +22,15 @@ import { WorkloadCard } from '@/components/dashboard/workload-card';
 import { UrgentTaskTable } from '@/components/dashboard/urgent-task-table';
 import type { Task } from '@/types/database.types';
 
-interface StaffWorkload {
-  name: string;
-  completedTasks: number;
-  totalTasks: number;
-}
+type DashboardPerspective = 'STAF' | 'KEPALA_SEKSI' | 'KEPALA_UNIT' | 'KEPALA_KANWIL';
 
-interface ChartBarItem {
-  label: string;
-  val: string;
+interface SectionHealth {
+  id: string;
+  name: string;
+  total: number;
+  completed: number;
+  critical: number;
+  percentage: number;
 }
 
 export default function DashboardPage() {
@@ -31,9 +38,16 @@ export default function DashboardPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
-  const [filterMode, setFilterMode] = useState<'unit' | 'konsolidasi'>('unit');
+  const [currentUserRole, setCurrentUserRole] = useState<string>('STAF');
+  const [activePerspective, setActivePerspective] = useState<DashboardPerspective>('STAF');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
-  // Metrik states
+  // Unit context
+  const [userUnit, setUserUnit] = useState<any>(null);
+  const [unitList, setUnitList] = useState<any[]>([]);
+  const [simulatedUnitId, setSimulatedUnitId] = useState<string>('');
+
+  // Metrics Data
   const [metrics, setMetrics] = useState({
     total: 0,
     completed: 0,
@@ -41,232 +55,393 @@ export default function DashboardPage() {
     critical: 0,
   });
 
-  const [workloadData, setWorkloadData] = useState<StaffWorkload[]>([]);
-  const [chartBars, setChartBars] = useState<ChartBarItem[]>([]);
   const [urgentTasks, setUrgentTasks] = useState<Task[]>([]);
+  const [workloadData, setWorkloadData] = useState<any[]>([]);
+  const [sectionMatrix, setSectionMatrix] = useState<SectionHealth[]>([]);
+  const [regionalLeaderboard, setRegionalLeaderboard] = useState<SectionHealth[]>([]);
 
   useEffect(() => {
-    fetchDashboardMetrics();
-  }, [filterMode]);
+    initDashboard();
+  }, []);
 
-  const fetchDashboardMetrics = async () => {
+  useEffect(() => {
+    if (userUnit) {
+      loadPerspectiveData(activePerspective, simulatedUnitId || userUnit.id);
+    }
+  }, [activePerspective, simulatedUnitId]);
+
+  const initDashboard = async () => {
     setLoading(true);
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       router.push('/login');
       return;
     }
 
-    // 1. Ambil info profil & unit kerja user
     const { data: profile } = await supabase
       .from('profiles')
-      .select('unit_id, role, unit:units(id, name, level, parent_id)')
+      .select('id, full_name, role, unit_id, unit:units(id, name, level, parent_id)')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.unit_id) {
+    if (!profile) {
       setLoading(false);
       return;
     }
 
-    // 2. Tentukan cakupan Unit IDs berdasarkan mode filter
-    let targetUnitIds: string[] = [profile.unit_id];
+    const role = profile.role || 'STAF';
+    setCurrentUserRole(role);
+    setUserUnit(profile.unit);
+    setSimulatedUnitId(profile.unit_id);
 
-    if (filterMode === 'konsolidasi') {
-      const userUnit = profile.unit as any;
-      if (userUnit?.level === 'SEKSI' && userUnit.parent_id) {
-        // Ambil semua seksi yang berada dalam KPPN induk yang sama
-        const { data: siblingUnits } = await supabase
-          .from('units')
-          .select('id')
-          .eq('parent_id', userUnit.parent_id);
+    const isAdmin = role === 'SUPER_ADMIN';
+    setIsAdmin(isAdmin);
 
-        if (siblingUnits && siblingUnits.length > 0) {
-          targetUnitIds = siblingUnits.map((u) => u.id);
-        }
-      } else if (userUnit?.level === 'ESELON_III' || userUnit?.level === 'ESELON_II') {
-        // Ambil seluruh unit anak (sub-units)
-        const { data: childUnits } = await supabase
-          .from('units')
-          .select('id')
-          .eq('parent_id', userUnit.id);
-
-        if (childUnits && childUnits.length > 0) {
-          targetUnitIds = [userUnit.id, ...childUnits.map((u) => u.id)];
-        }
-      }
+    // Tentukan default perspective berdasarkan role akun
+    let initialPerspective: DashboardPerspective = 'STAF';
+    if (isAdmin || (profile.unit as any)?.level === 'ESELON_II') {
+      initialPerspective = 'KEPALA_KANWIL';
+    } else if (role === 'KEPALA_UNIT' || (profile.unit as any)?.level === 'ESELON_III') {
+      initialPerspective = 'KEPALA_UNIT';
+    } else if (role === 'KEPALA_SEKSI') {
+      initialPerspective = 'KEPALA_SEKSI';
     }
 
-    // 3. Ambil data tasks periode berjalan
-    const { data: tasks, error: tasksError } = await supabase
-      .from('tasks')
-      .select('*')
-      .in('unit_id', targetUnitIds)
-      .order('deadline', { ascending: true });
+    setActivePerspective(initialPerspective);
 
-    if (tasksError || !tasks) {
-      setLoading(false);
-      return;
+    // Ambil daftar unit untuk switcher jika admin
+    if (isAdmin) {
+      const { data: allUnits } = await supabase.from('units').select('id, name, level').order('name');
+      if (allUnits) setUnitList(allUnits);
     }
 
-    // 4. Hitung Metrik & Tugas Kritis Berdasarkan Tanggal Hari Ini
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    await loadPerspectiveData(initialPerspective, profile.unit_id, profile.id);
+  };
 
-    const threeDaysLater = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000);
-    const threeDaysLaterStr = threeDaysLater.toISOString().split('T')[0];
+  const loadPerspectiveData = async (
+    perspective: DashboardPerspective, 
+    targetUnitId: string, 
+    currentUserId?: string
+  ) => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const userId = currentUserId || user?.id;
 
-    let completedCount = 0;
-    let inProgressCount = 0;
-    let criticalCount = 0;
-    const criticalList: Task[] = [];
+    const todayStr = new Date().toISOString().split('T')[0];
+    const threeDaysLater = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    tasks.forEach((t) => {
-      const isCompleted = t.status === 'SELESAI';
-      const isKendala = t.status === 'TERKENDALA';
-      // Kritis jika terkendala ATAU belum selesai dan tenggat <= H-3 (termasuk yang lewat tenggat)
-      const isOverdueOrH3 = !isCompleted && t.deadline <= threeDaysLaterStr;
-
-      if (isCompleted) {
-        completedCount++;
-      } else if (t.status === 'ON_PROGRESS') {
-        inProgressCount++;
-      }
-
-      if (isKendala || isOverdueOrH3) {
-        criticalCount++;
-        criticalList.push(t as Task);
-      }
-    });
-
-    setMetrics({
-      total: tasks.length,
-      completed: completedCount,
-      inProgress: inProgressCount,
-      critical: criticalCount,
-    });
-
-    // Urutkan tugas kritis: yang paling lampau / mendekati tenggat di posisi teratas
-    criticalList.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
-    setUrgentTasks(criticalList.slice(0, 5)); // Tampilkan 5 tugas paling mendesak
-
-    // 5. Hitung Distribusi Beban Kerja (Berdasarkan PIC Pegawai)
-    const taskIds = tasks.map((t) => t.id);
-    if (taskIds.length > 0) {
-      const { data: pics } = await supabase
+    // ==========================================
+    // 1. PERSPEKTIF STAF (HANYA TUGAS PRIBADI)
+    // ==========================================
+    if (perspective === 'STAF') {
+      // Ambil tugas di mana user terdaftar sebagai PIC
+      const { data: picRecords } = await supabase
         .from('task_pics')
-        .select(`
-          user_id,
-          task_id,
-          profile:profiles(id, full_name)
-        `)
-        .in('task_id', taskIds);
+        .select('task_id')
+        .eq('user_id', userId);
 
-      if (pics && pics.length > 0) {
+      const myTaskIds = (picRecords || []).map((p) => p.task_id);
+
+      if (myTaskIds.length === 0) {
+        setMetrics({ total: 0, completed: 0, inProgress: 0, critical: 0 });
+        setUrgentTasks([]);
+        setLoading(false);
+        return;
+      }
+
+      const { data: myTasks } = await supabase
+        .from('tasks')
+        .select('*')
+        .in('id', myTaskIds)
+        .order('deadline', { ascending: true });
+
+      const tasks = myTasks || [];
+      const completed = tasks.filter((t) => t.status === 'SELESAI').length;
+      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const critical = tasks.filter(
+        (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+      );
+
+      setMetrics({
+        total: tasks.length,
+        completed,
+        inProgress,
+        critical: critical.length,
+      });
+      setUrgentTasks(critical.slice(0, 5) as Task[]);
+    }
+
+    // ==========================================
+    // 2. PERSPEKTIF KEPALA SEKSI (1 SEKSI)
+    // ==========================================
+    else if (perspective === 'KEPALA_SEKSI') {
+      const { data: tasks } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('unit_id', targetUnitId)
+        .order('deadline', { ascending: true });
+
+      const allTasks = tasks || [];
+      const completed = allTasks.filter((t) => t.status === 'SELESAI').length;
+      const inProgress = allTasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const critical = allTasks.filter(
+        (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+      );
+
+      setMetrics({
+        total: allTasks.length,
+        completed,
+        inProgress,
+        critical: critical.length,
+      });
+      setUrgentTasks(critical.slice(0, 5) as Task[]);
+
+      // Hitung Workload Staf dalam Seksi
+      const taskIds = allTasks.map((t) => t.id);
+      if (taskIds.length > 0) {
+        const { data: pics } = await supabase
+          .from('task_pics')
+          .select('task_id, profile:profiles(full_name)')
+          .in('task_id', taskIds);
+
         const staffMap = new Map<string, { name: string; completed: number; total: number }>();
-
-        pics.forEach((item: any) => {
-          const staffName = item.profile?.full_name || 'Pegawai';
-          const relatedTask = tasks.find((t) => t.id === item.task_id);
-          const isDone = relatedTask?.status === 'SELESAI';
-
-          if (!staffMap.has(staffName)) {
-            staffMap.set(staffName, { name: staffName, completed: 0, total: 0 });
-          }
-
-          const current = staffMap.get(staffName)!;
-          current.total++;
-          if (isDone) current.completed++;
+        (pics || []).forEach((p: any) => {
+          const name = p.profile?.full_name || 'Staf';
+          const related = allTasks.find((t) => t.id === p.task_id);
+          if (!staffMap.has(name)) staffMap.set(name, { name, completed: 0, total: 0 });
+          const item = staffMap.get(name)!;
+          item.total++;
+          if (related?.status === 'SELESAI') item.completed++;
         });
 
-        const sortedWorkload = Array.from(staffMap.values()).sort(
-          (a, b) => b.total - a.total
-        );
-        setWorkloadData(sortedWorkload.slice(0, 5));
+        setWorkloadData(Array.from(staffMap.values()).sort((a, b) => b.total - a.total));
       } else {
         setWorkloadData([]);
       }
-    } else {
-      setWorkloadData([]);
     }
 
-    // 6. Hitung Ritme Capaian Per Bulan (Bulan 1 s.d. 8 / periode berjalan)
-    const monthlyStats: { [key: number]: { total: number; completed: number } } = {};
-    for (let m = 1; m <= 8; m++) {
-      monthlyStats[m] = { total: 0, completed: 0 };
-    }
+    // ==========================================
+    // 3. PERSPEKTIF KEPALA KANTOR / KAKPPN (LINTAS SEKSI)
+    // ==========================================
+    else if (perspective === 'KEPALA_UNIT') {
+      // Ambil seluruh seksi di bawah kantor ini
+      const { data: childUnits } = await supabase
+        .from('units')
+        .select('id, name')
+        .eq('parent_id', targetUnitId);
 
-    tasks.forEach((t) => {
-      const m = t.period_month || (new Date(t.deadline).getMonth() + 1);
-      if (m >= 1 && m <= 8) {
-        monthlyStats[m].total++;
-        if (t.status === 'SELESAI') monthlyStats[m].completed++;
+      const unitIds = childUnits && childUnits.length > 0 
+        ? [targetUnitId, ...childUnits.map((u) => u.id)]
+        : [targetUnitId];
+
+      const { data: allTasks } = await supabase
+        .from('tasks')
+        .select('*')
+        .in('unit_id', unitIds)
+        .order('deadline', { ascending: true });
+
+      const tasks = allTasks || [];
+      const completed = tasks.filter((t) => t.status === 'SELESAI').length;
+      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const critical = tasks.filter(
+        (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+      );
+
+      setMetrics({
+        total: tasks.length,
+        completed,
+        inProgress,
+        critical: critical.length,
+      });
+      setUrgentTasks(critical.slice(0, 5) as Task[]);
+
+      // Bangun Matriks Performa Antar-Seksi
+      if (childUnits && childUnits.length > 0) {
+        const matrix: SectionHealth[] = childUnits.map((u) => {
+          const uTasks = tasks.filter((t) => t.unit_id === u.id);
+          const uDone = uTasks.filter((t) => t.status === 'SELESAI').length;
+          const uCrit = uTasks.filter(
+            (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+          ).length;
+          const pct = uTasks.length > 0 ? Math.round((uDone / uTasks.length) * 100) : 0;
+          return {
+            id: u.id,
+            name: u.name,
+            total: uTasks.length,
+            completed: uDone,
+            critical: uCrit,
+            percentage: pct,
+          };
+        });
+        setSectionMatrix(matrix);
       }
-    });
+    }
 
-    const computedBars: ChartBarItem[] = Object.keys(monthlyStats).map((key) => {
-      const mNum = Number(key);
-      const stat = monthlyStats[mNum];
-      const pct = stat.total > 0 ? Math.round((stat.completed / stat.total) * 100) : 0;
-      return {
-        label: `B${mNum}`,
-        val: `${Math.max(pct, 8)}%`, // Nilai minimal 8% agar bar tetap tampak rapi
-      };
-    });
+    // ==========================================
+    // 4. PERSPEKTIF KEPALA KANWIL (REGIONAL SE-JATENG)
+    // ==========================================
+    else if (perspective === 'KEPALA_KANWIL') {
+      const { data: allTasks } = await supabase
+        .from('tasks')
+        .select('*, unit:units(id, name, parent_id, level)')
+        .order('deadline', { ascending: true });
 
-    setChartBars(computedBars);
+      const tasks = allTasks || [];
+      const completed = tasks.filter((t) => t.status === 'SELESAI').length;
+      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const critical = tasks.filter(
+        (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+      );
+
+      setMetrics({
+        total: tasks.length,
+        completed,
+        inProgress,
+        critical: critical.length,
+      });
+      setUrgentTasks(critical.slice(0, 5) as Task[]);
+
+      // Ambil Seluruh Eselon III (KPPN & Bidang) untuk Leaderboard Regional
+      const { data: eselon3Units } = await supabase
+        .from('units')
+        .select('id, name')
+        .eq('level', 'ESELON_III');
+
+      if (eselon3Units) {
+        // Ambil pemetaan seksi anak untuk mengagregasikan tugas ke KPPN induk
+        const { data: seksiUnits } = await supabase
+          .from('units')
+          .select('id, parent_id')
+          .eq('level', 'SEKSI');
+
+        const parentMap = new Map<string, string>();
+        (seksiUnits || []).forEach((s) => {
+          if (s.parent_id) parentMap.set(s.id, s.parent_id);
+        });
+
+        const leaderboard: SectionHealth[] = eselon3Units.map((e3) => {
+          const assignedTasks = tasks.filter(
+            (t) => t.unit_id === e3.id || parentMap.get(t.unit_id) === e3.id
+          );
+          const done = assignedTasks.filter((t) => t.status === 'SELESAI').length;
+          const crit = assignedTasks.filter(
+            (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
+          ).length;
+          const pct = assignedTasks.length > 0 ? Math.round((done / assignedTasks.length) * 100) : 0;
+
+          return {
+            id: e3.id,
+            name: e3.name,
+            total: assignedTasks.length,
+            completed: done,
+            critical: crit,
+            percentage: pct,
+          };
+        });
+
+        setRegionalLeaderboard(leaderboard.sort((a, b) => b.percentage - a.percentage));
+      }
+    }
+
     setLoading(false);
   };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Header & Filter Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-stone-900 tracking-tight">Kinerja & Pemantauan Tusi</h1>
-          <p className="text-xs text-stone-500 mt-0.5">Pemantauan progres pelaksanaan tugas berkala instansi</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Tab Switcher Scope */}
-          <div className="bg-stone-100 p-1 rounded-full border border-stone-200/60 flex items-center text-xs">
-            <button
-              onClick={() => setFilterMode('unit')}
-              className={`px-4 py-1.5 rounded-full font-medium transition-all ${
-                filterMode === 'unit' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
-              }`}
-            >
-              Unit Saya
-            </button>
-            <button
-              onClick={() => setFilterMode('konsolidasi')}
-              className={`px-4 py-1.5 rounded-full font-medium transition-all ${
-                filterMode === 'konsolidasi' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
-              }`}
-            >
-              Konsolidasi Kanwil/KPPN
-            </button>
+      
+      {/* PERSPECTIVE SWITCHER (KHUSUS SUPER_ADMIN) */}
+      {isSuperAdmin && (
+        <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-md space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Eye className="w-4 h-4 text-[#DF3B68]" />
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-300">
+                Mode Pratinjau Super Admin:
+              </span>
+            </div>
+            
+            {/* Pilihan Level Perspektif */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-stone-800 p-1 rounded-2xl">
+              {[
+                { id: 'STAF', label: 'Staf' },
+                { id: 'KEPALA_SEKSI', label: 'Kepala Seksi' },
+                { id: 'KEPALA_UNIT', label: 'Kepala Kantor' },
+                { id: 'KEPALA_KANWIL', label: 'Kepala Kanwil' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActivePerspective(tab.id as DashboardPerspective)}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                    activePerspective === tab.id
+                      ? 'bg-[#DF3B68] text-white shadow-sm'
+                      : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <button
-            onClick={fetchDashboardMetrics}
-            className="p-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-stone-500 transition-colors"
-            title="Refresh Data"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-primary' : ''}`} />
-          </button>
+          {/* Unit Switcher jika ingin simulasi unit tertentu */}
+          {activePerspective !== 'KEPALA_KANWIL' && unitList.length > 0 && (
+            <div className="flex items-center gap-2 pt-2 border-t border-stone-800 text-xs">
+              <span className="text-stone-400">Simulasikan Unit:</span>
+              <select
+                value={simulatedUnitId}
+                onChange={(e) => setSimulatedUnitId(e.target.value)}
+                className="bg-stone-800 text-stone-200 px-3 py-1 rounded-xl border border-stone-700 text-xs focus:outline-none"
+              >
+                {unitList.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    [{u.level}] {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* HEADER DASHBOARD */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-stone-900 tracking-tight">
+              {activePerspective === 'STAF' && 'Dashboard Kerja Saya'}
+              {activePerspective === 'KEPALA_SEKSI' && 'Supervisory Cockpit Seksi'}
+              {activePerspective === 'KEPALA_UNIT' && 'Executive Health Scorecard'}
+              {activePerspective === 'KEPALA_KANWIL' && 'Regional Command Center Kanwil'}
+            </h1>
+            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200">
+              {activePerspective}
+            </span>
+          </div>
+          <p className="text-xs text-stone-500 mt-0.5">
+            {activePerspective === 'STAF' && 'Pantau dan eksekusi tugas serta sub-tugas yang ditugaskan kepada Anda.'}
+            {activePerspective === 'KEPALA_SEKSI' && 'Monitoring progres capaian seksi, beban kerja staf, dan mitigasi kendala.'}
+            {activePerspective === 'KEPALA_UNIT' && 'Evaluasi kesehatan kinerja antar-seksi dan deteksi titik kritis kantor.'}
+            {activePerspective === 'KEPALA_KANWIL' && 'Postur kepatuhan dan peringkat kinerja seluruh KPPN dan Bidang se-Wilayah.'}
+          </p>
+        </div>
+
+        <button
+          onClick={() => loadPerspectiveData(activePerspective, simulatedUnitId || userUnit?.id)}
+          className="p-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-stone-500 transition-colors self-start sm:self-center"
+          title="Segarkan Data"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#DF3B68]' : ''}`} />
+        </button>
       </div>
 
-      {/* 4 Kartu Metrik Ringkasan (Dengan Drill-Down Link Terfilter) */}
+      {/* 4 KARTU METRIK RINGKASAN */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard 
-          label="Total Target Tusi" 
+          label={activePerspective === 'STAF' ? 'Tugas Saya' : 'Total Target Tusi'} 
           value={loading ? '...' : metrics.total} 
           icon={ListTodo} 
           iconColor="text-blue-500" 
-          subLabel="Target periode berjalan"
+          subLabel="Beban periode berjalan"
           onClick={() => router.push('/tasks?status=ALL')}
         />
         <MetricCard 
@@ -290,39 +465,165 @@ export default function DashboardPage() {
           value={loading ? '...' : metrics.critical} 
           icon={AlertTriangle} 
           iconColor="text-rose-500" 
-          subLabel="H-3 atau perlu eskalasi"
+          subLabel="H-3 atau butuh koordinasi"
           onClick={() => router.push('/tasks?status=KRITIS')}
         />
       </div>
 
-      {/* Baris 2: Beban Kerja Pegawai & Grafik Ritme Penyelesaian */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <WorkloadCard data={workloadData} />
-
-        {/* Card Ritme / Distribusi Capaian Real-Time */}
-        <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-stone-900">Ritme Penyelesaian Tugas</h4>
-            <span className="text-[11px] text-stone-400 font-medium">Bulan 1 s.d. 8</span>
-          </div>
-
-          <div className="h-40 flex items-end justify-between gap-3 pt-6 px-3">
-            {chartBars.map((bar, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end">
-                <div
-                  className="w-full max-w-[26px] bg-primary rounded-t-lg hover:opacity-85 transition-all duration-200"
-                  style={{ height: bar.val }}
-                  title={`Capaian ${bar.label}: ${bar.val}`}
-                />
-                <span className="text-[10px] text-stone-400 font-mono">{bar.label}</span>
-              </div>
-            ))}
-          </div>
+      {/* ========================================================= */}
+      {/* KONTEN LEVEL 1: STAF (HANYA TABEL TUGAS PRIBADI, NO CHARTS) */}
+      {/* ========================================================= */}
+      {activePerspective === 'STAF' && (
+        <div className="space-y-6">
+          <UrgentTaskTable 
+            tasks={urgentTasks} 
+            title="Tugas Saya yang Kritis / Mendekati Batas Waktu" 
+          />
         </div>
-      </div>
+      )}
 
-      {/* Baris 3: Tabel Tugas Kritis Real-Time / H-3 */}
-      <UrgentTaskTable tasks={urgentTasks} />
+      {/* ========================================================= */}
+      {/* KONTEN LEVEL 2: KEPALA SEKSI (WORKLOAD STAF & RADAR KENDALA) */}
+      {/* ========================================================= */}
+      {activePerspective === 'KEPALA_SEKSI' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <WorkloadCard data={workloadData} />
+            <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft flex flex-col justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-stone-900">Indeks Kepatuhan Seksi</h4>
+                <p className="text-xs text-stone-500 mt-1">Rasio penyelesaian tugas tepat waktu pada periode aktif.</p>
+              </div>
+              <div className="py-6 text-center">
+                <p className="text-5xl font-black text-[#DF3B68]">
+                  {metrics.total > 0 ? Math.round((metrics.completed / metrics.total) * 100) : 0}%
+                </p>
+                <p className="text-xs text-stone-400 mt-2 font-medium">
+                  {metrics.completed} dari {metrics.total} tugas telah tuntas
+                </p>
+              </div>
+              <Link 
+                href="/tasks/new" 
+                className="w-full py-2 bg-stone-900 text-white rounded-xl text-xs font-semibold text-center hover:bg-stone-800 transition-colors"
+              >
+                + Beri Penugasan Baru
+              </Link>
+            </div>
+          </div>
+          <UrgentTaskTable 
+            tasks={urgentTasks} 
+            title="Radar Tugas Seksi Terkendala & Kritis" 
+          />
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* KONTEN LEVEL 3: KEPALA KANTOR (MATRIKS PERFORMA ANTAR-SEKSI) */}
+      {/* ========================================================= */}
+      {activePerspective === 'KEPALA_UNIT' && (
+        <div className="space-y-6">
+          {/* Matriks Antar Seksi */}
+          <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-stone-900">Matriks Kesehatan Kinerja Antar-Seksi</h4>
+                <p className="text-xs text-stone-500">Komparasi capaian tusi dan titik kritis per unit kerja.</p>
+              </div>
+              <Building2 className="w-4 h-4 text-stone-400" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+              {sectionMatrix.map((sec) => (
+                <div key={sec.id} className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <p className="text-xs font-bold text-stone-900 leading-snug line-clamp-2">{sec.name}</p>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      sec.percentage >= 80 ? 'bg-emerald-100 text-emerald-800' :
+                      sec.percentage >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {sec.percentage}%
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between text-xs text-stone-600 font-medium">
+                    <span>{sec.completed}/{sec.total} Selesai</span>
+                    {sec.critical > 0 ? (
+                      <span className="text-rose-600 font-bold">{sec.critical} Kritis</span>
+                    ) : (
+                      <span className="text-emerald-600">Nihil Kendala</span>
+                    )}
+                  </div>
+
+                  <div className="w-full bg-stone-200 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full ${sec.percentage >= 80 ? 'bg-emerald-500' : sec.percentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                      style={{ width: `${sec.percentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <UrgentTaskTable 
+            tasks={urgentTasks} 
+            title="Eskalasi Manajerial: Tugas Kritis Seluruh Kantor" 
+          />
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* KONTEN LEVEL 4: KEPALA KANWIL (LEADERBOARD REGIONAL SATKER) */}
+      {/* ========================================================= */}
+      {activePerspective === 'KEPALA_KANWIL' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-stone-900">Leaderboard Kepatuhan KPPN & Bidang se-Jawa Tengah</h4>
+                <p className="text-xs text-stone-500">Peringkat kepatuhan dan kecepatan penyelesaian tusi regional.</p>
+              </div>
+              <TrendingUp className="w-4 h-4 text-[#DF3B68]" />
+            </div>
+
+            <div className="divide-y divide-stone-100">
+              {regionalLeaderboard.map((unit, index) => (
+                <div key={unit.id} className="py-3.5 flex items-center justify-between gap-4 hover:bg-stone-50/60 px-2 rounded-xl transition-colors">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      index === 0 ? 'bg-amber-100 text-amber-800' :
+                      index === 1 ? 'bg-stone-200 text-stone-800' :
+                      index === 2 ? 'bg-orange-100 text-orange-800' : 'text-stone-400'
+                    }`}>
+                      {index + 1}
+                    </span>
+                    <div className="truncate">
+                      <p className="text-xs font-bold text-stone-900 truncate">{unit.name}</p>
+                      <p className="text-[11px] text-stone-500">{unit.completed} dari {unit.total} tugas tuntas ({unit.critical} kritis)</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="w-24 bg-stone-100 h-2 rounded-full overflow-hidden hidden sm:block">
+                      <div 
+                        className={`h-full ${unit.percentage >= 80 ? 'bg-emerald-500' : unit.percentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                        style={{ width: `${unit.percentage}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-stone-900 w-12 text-right">{unit.percentage}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <UrgentTaskTable 
+            tasks={urgentTasks} 
+            title="Radar Titik Kritis Regional Kanwil" 
+          />
+        </div>
+      )}
+
     </div>
   );
 }
