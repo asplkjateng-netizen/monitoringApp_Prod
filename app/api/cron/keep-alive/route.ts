@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Helper menghitung deadline untuk tugas yang digenerate Cron
 function computeCycleDeadline(
   periodType: string,
   deadlineRule: string | null,
@@ -9,7 +8,7 @@ function computeCycleDeadline(
   now: Date
 ): string {
   const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1; // 1-12
+  const currentMonth = now.getMonth() + 1;
   const rule = deadlineRule || 'END_OF_PERIOD';
   const day = exactDay || 31;
 
@@ -75,13 +74,12 @@ export async function GET(request: Request) {
     return new NextResponse('Unauthorized: Invalid CRON_SECRET token', { status: 401 });
   }
 
-  // 2. Service Role Client untuk bypass RLS
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // 3. Keep-Alive Ping
+  // 2. Keep-Alive Ping
   const { data: pingData, error: pingError } = await supabase
     .from('units')
     .select('id')
@@ -97,30 +95,17 @@ export async function GET(request: Request) {
   const currentYear = now.getFullYear();
 
   let generatedTasksCount = 0;
+  let archivedTasksCount = 0;
+  let purgedNotificationsCount = 0;
 
-  // 4. [BACKLOG-4] Recurring Task Generator Engine
-  // Jalankan generator pada tanggal 1 setiap bulan
+  // 3. [BACKLOG-4] Recurring Task Generator (Tiap Tanggal 1)
   if (currentDay === 1) {
     try {
-      // Tentukan siklus periode yang berhak dibangkitkan hari ini
       const eligiblePeriods: string[] = ['BULANAN'];
+      if ([1, 4, 7, 10].includes(currentMonth)) eligiblePeriods.push('TRIWULANAN');
+      if ([1, 7].includes(currentMonth)) eligiblePeriods.push('SEMESTERAN');
+      if (currentMonth === 1) eligiblePeriods.push('TAHUNAN');
 
-      // Awal Triwulan (1 Jan, 1 Apr, 1 Jul, 1 Okt)
-      if ([1, 4, 7, 10].includes(currentMonth)) {
-        eligiblePeriods.push('TRIWULANAN');
-      }
-
-      // Awal Semester (1 Jan, 1 Jul)
-      if ([1, 7].includes(currentMonth)) {
-        eligiblePeriods.push('SEMESTERAN');
-      }
-
-      // Awal Tahun (1 Jan)
-      if (currentMonth === 1) {
-        eligiblePeriods.push('TAHUNAN');
-      }
-
-      // Ambil seluruh master template yang aktif berulang
       const { data: recurringTemplates } = await supabase
         .from('task_templates')
         .select('*')
@@ -129,7 +114,6 @@ export async function GET(request: Request) {
 
       if (recurringTemplates && recurringTemplates.length > 0) {
         for (const tpl of recurringTemplates) {
-          // Cek apakah tugas periode ini sudah pernah dibuat sebelumnya (anti-duplicate)
           const { data: existingTask } = await supabase
             .from('tasks')
             .select('id')
@@ -147,7 +131,6 @@ export async function GET(request: Request) {
               now
             );
 
-            // Insert tugas baru
             const { data: newTask, error: insertError } = await supabase
               .from('tasks')
               .insert({
@@ -168,8 +151,6 @@ export async function GET(request: Request) {
 
             if (!insertError && newTask) {
               generatedTasksCount++;
-
-              // Beri notifikasi ke atasan / pimpinan unit kerja
               const { data: unitLeaders } = await supabase
                 .from('profiles')
                 .select('id')
@@ -180,7 +161,7 @@ export async function GET(request: Request) {
                 const notifPayloads = unitLeaders.map((u) => ({
                   user_id: u.id,
                   title: `🔄 Tugas Rutin Baru Terbit: ${tpl.title}`,
-                  message: `Tugas siklus ${tpl.period_type} telah dibangkitkan otomatis untuk periode ${currentMonth}/${currentYear}. Batas tenggat: ${calculatedDeadline}.`,
+                  message: `Tugas siklus ${tpl.period_type} periode ${currentMonth}/${currentYear} telah diterbitkan. Tenggat: ${calculatedDeadline}.`,
                   action_link: `/tasks/${newTask.id}`,
                   is_read: false,
                 }));
@@ -191,11 +172,97 @@ export async function GET(request: Request) {
         }
       }
     } catch (recurringErr) {
-      console.error('Error saat membangkitkan tugas rutin:', recurringErr);
+      console.error('Error recurring generator:', recurringErr);
     }
   }
 
-  // 5. [BACKLOG-1] Pengecekan Deadline H-1
+  // 4. [BARU - ARCHIVING ENGINE] Memindahkan Tugas Selesai > 30 Hari ke task_archives
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: completedTasks } = await supabase
+      .from('tasks')
+      .select(`
+        id, unit_id, template_id, title, legal_basis, period_type, period_month,
+        period_year, deadline, completed_at, evidence_link, kendala_note,
+        profiles:created_by (full_name),
+        task_pics (profiles (id, full_name, nip)),
+        subtasks (title, is_completed, custom_evidence_link)
+      `)
+      .eq('status', 'SELESAI')
+      .lte('completed_at', thirtyDaysAgo);
+
+    if (completedTasks && completedTasks.length > 0) {
+      for (const t of completedTasks) {
+        const picsSummary = (t.task_pics || []).map((tp: any) => ({
+          id: tp.profiles?.id,
+          name: tp.profiles?.full_name,
+          nip: tp.profiles?.nip,
+        }));
+
+        const subtasksSummary = (t.subtasks || []).map((st: any) => ({
+          title: st.title,
+          done: st.is_completed,
+          evidence: st.custom_evidence_link || null,
+        }));
+
+        const archiveRecord = {
+          id: t.id,
+          unit_id: t.unit_id,
+          template_id: t.template_id,
+          title: t.title,
+          legal_basis: t.legal_basis,
+          period_type: t.period_type,
+          period_month: t.period_month,
+          period_year: t.period_year,
+          deadline: t.deadline,
+          completed_at: t.completed_at,
+          evidence_link: t.evidence_link,
+          kendala_note: t.kendala_note,
+          created_by_name: (t.profiles as any)?.full_name || 'Sistem',
+          pics_summary: picsSummary,
+          subtasks_summary: subtasksSummary,
+          archived_at: new Date().toISOString(),
+        };
+
+        const { error: archiveError } = await supabase.from('task_archives').upsert(archiveRecord);
+
+        if (!archiveError) {
+          // Hapus dari tabel tasks operasional (cascade delete menghapus task_pics dan subtasks)
+          await supabase.from('tasks').delete().eq('id', t.id);
+          archivedTasksCount++;
+        }
+      }
+    }
+  } catch (archiveErr) {
+    console.error('Error saat pengarsipan tugas:', archiveErr);
+  }
+
+  // 5. [BARU - NOTIFICATION PURGE] Menghapus Notifikasi Usang
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { error: purgeReadErr } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('is_read', true)
+      .lte('created_at', thirtyDaysAgo);
+
+    const { error: purgeUnreadErr } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('is_read', false)
+      .lte('created_at', ninetyDaysAgo);
+
+    if (!purgeReadErr && !purgeUnreadErr) {
+      purgedNotificationsCount++;
+    }
+  } catch (purgeErr) {
+    console.error('Error membersihkan notifikasi usang:', purgeErr);
+  }
+
+  // 6. [BACKLOG-1] Pengecekan Deadline H-1
   let deadlineAlertsSent = 0;
   try {
     const tomorrow = new Date();
@@ -219,7 +286,7 @@ export async function GET(request: Request) {
           const notificationsPayload = pics.map((p) => ({
             user_id: p.user_id,
             title: `⏰ Pengingat Tenggat Waktu (H-1)`,
-            message: `Tugas "${t.title}" akan jatuh tempo besok (${t.deadline}). Pastikan tahapan pekerjaan tuntas dan bukti dukung telah diunggah.`,
+            message: `Tugas "${t.title}" akan jatuh tempo besok (${t.deadline}). Pastikan bukti dukung telah diunggah.`,
             action_link: `/tasks/${t.id}`,
             is_read: false,
           }));
@@ -230,15 +297,17 @@ export async function GET(request: Request) {
       }
     }
   } catch (alertErr) {
-    console.error('Error saat memproses notifikasi deadline H-1:', alertErr);
+    console.error('Error notifikasi deadline H-1:', alertErr);
   }
 
   return NextResponse.json({
     success: true,
-    message: 'Supabase ping, recurring generator, and deadline check completed',
+    message: 'Cron job maintenance completed successfully',
     timestamp: new Date().toISOString(),
     keep_alive_ping: pingData ? 'OK' : 'EMPTY',
     recurring_tasks_generated: generatedTasksCount,
+    tasks_archived: archivedTasksCount,
+    notifications_purged: purgedNotificationsCount > 0 ? 'CLEANED' : 'NO_OP',
     deadline_alerts_generated: deadlineAlertsSent,
   });
 }
