@@ -2,7 +2,9 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  let supabaseResponse = NextResponse.next({
+    request,
+  });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,10 +14,14 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet: any) {
-          cookiesToSet.forEach(({ name, value }: any) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }: any) =>
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+          supabaseResponse = NextResponse.next({
+            request,
+          });
+          cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
         },
@@ -23,37 +29,33 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
-  const isAuthPage = pathname.startsWith('/login') || pathname.startsWith('/register');
-  const isPendingPage = pathname === '/pending';
-  const isPublicRoute = isAuthPage || pathname.startsWith('/api/');
+  const path = request.nextUrl.pathname;
 
-  if (!user && !isPublicRoute && !isPendingPage) {
+  // Daftar rute publik yang dapat diakses tanpa login
+  const isPublicRoute =
+    path === '/login' ||
+    path === '/register' ||
+    path === '/forgot-password' ||
+    path === '/update-password' ||
+    path.startsWith('/auth') ||
+    path.startsWith('/api/cron');
+
+  // 1. Jika belum login dan mengakses halaman privat -> redirect ke /login
+  if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  if (user && !isPublicRoute) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('approval_status')
-      .eq('id', user.id)
-      .single();
-
-    if (profile?.approval_status === 'PENDING' && !isPendingPage) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/pending';
-      return NextResponse.redirect(url);
-    }
-
-    if (profile?.approval_status === 'APPROVED' && (isPendingPage || isAuthPage)) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/dashboard';
-      return NextResponse.redirect(url);
-    }
+  // 2. Jika sudah login dan mengakses halaman auth (kecuali update-password) -> redirect ke /dashboard
+  if (user && (path === '/login' || path === '/register' || path === '/forgot-password')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
   }
 
   return supabaseResponse;
