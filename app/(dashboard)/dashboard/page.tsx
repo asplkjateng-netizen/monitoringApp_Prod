@@ -10,11 +10,9 @@ import {
   ListTodo, 
   RefreshCw,
   Building2,
-  ShieldCheck,
   TrendingUp,
-  UserCheck,
-  ChevronRight,
-  Eye
+  Eye,
+  SlidersHorizontal
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { MetricCard } from '@/components/dashboard/metric-card';
@@ -89,15 +87,15 @@ export default function DashboardPage() {
       return;
     }
 
-    const role = profile.role || 'STAF';
+    const role = String(profile.role || 'STAF').toUpperCase();
+    const isAdmin = role === 'SUPER_ADMIN';
+
     setCurrentUserRole(role);
+    setIsSuperAdmin(isAdmin); // <-- PERBAIKAN: set state boolean admin dengan benar
     setUserUnit(profile.unit);
     setSimulatedUnitId(profile.unit_id);
 
-    const isAdmin = role === 'SUPER_ADMIN';
-    setIsAdmin(isAdmin);
-
-    // Tentukan default perspective berdasarkan role akun
+    // Tentukan default perspective awal
     let initialPerspective: DashboardPerspective = 'STAF';
     if (isAdmin || (profile.unit as any)?.level === 'ESELON_II') {
       initialPerspective = 'KEPALA_KANWIL';
@@ -109,9 +107,12 @@ export default function DashboardPage() {
 
     setActivePerspective(initialPerspective);
 
-    // Ambil daftar unit untuk switcher jika admin
+    // Ambil daftar seluruh unit jika role adalah SUPER_ADMIN
     if (isAdmin) {
-      const { data: allUnits } = await supabase.from('units').select('id, name, level').order('name');
+      const { data: allUnits } = await supabase
+        .from('units')
+        .select('id, name, level')
+        .order('name');
       if (allUnits) setUnitList(allUnits);
     }
 
@@ -127,14 +128,12 @@ export default function DashboardPage() {
     const { data: { user } } = await supabase.auth.getUser();
     const userId = currentUserId || user?.id;
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const threeDaysLater = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     // ==========================================
     // 1. PERSPEKTIF STAF (HANYA TUGAS PRIBADI)
     // ==========================================
     if (perspective === 'STAF') {
-      // Ambil tugas di mana user terdaftar sebagai PIC
       const { data: picRecords } = await supabase
         .from('task_pics')
         .select('task_id')
@@ -196,7 +195,6 @@ export default function DashboardPage() {
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
-      // Hitung Workload Staf dalam Seksi
       const taskIds = allTasks.map((t) => t.id);
       if (taskIds.length > 0) {
         const { data: pics } = await supabase
@@ -221,10 +219,9 @@ export default function DashboardPage() {
     }
 
     // ==========================================
-    // 3. PERSPEKTIF KEPALA KANTOR / KAKPPN (LINTAS SEKSI)
+    // 3. PERSPEKTIF KEPALA KANTOR / KAKPPN
     // ==========================================
     else if (perspective === 'KEPALA_UNIT') {
-      // Ambil seluruh seksi di bawah kantor ini
       const { data: childUnits } = await supabase
         .from('units')
         .select('id, name')
@@ -255,7 +252,6 @@ export default function DashboardPage() {
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
-      // Bangun Matriks Performa Antar-Seksi
       if (childUnits && childUnits.length > 0) {
         const matrix: SectionHealth[] = childUnits.map((u) => {
           const uTasks = tasks.filter((t) => t.unit_id === u.id);
@@ -278,7 +274,7 @@ export default function DashboardPage() {
     }
 
     // ==========================================
-    // 4. PERSPEKTIF KEPALA KANWIL (REGIONAL SE-JATENG)
+    // 4. PERSPEKTIF KEPALA KANWIL
     // ==========================================
     else if (perspective === 'KEPALA_KANWIL') {
       const { data: allTasks } = await supabase
@@ -301,14 +297,12 @@ export default function DashboardPage() {
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
-      // Ambil Seluruh Eselon III (KPPN & Bidang) untuk Leaderboard Regional
       const { data: eselon3Units } = await supabase
         .from('units')
         .select('id, name')
         .eq('level', 'ESELON_III');
 
       if (eselon3Units) {
-        // Ambil pemetaan seksi anak untuk mengagregasikan tugas ke KPPN induk
         const { data: seksiUnits } = await supabase
           .from('units')
           .select('id, parent_id')
@@ -349,19 +343,28 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       
-      {/* PERSPECTIVE SWITCHER (KHUSUS SUPER_ADMIN) */}
+      {/* ========================================================================= */}
+      {/* PERSPECTIVE SWITCHER (KHUSUS SUPER ADMIN - DILETAKKAN DI PALING ATAS)   */}
+      {/* ========================================================================= */}
       {isSuperAdmin && (
-        <div className="bg-stone-900 text-white p-4 rounded-3xl shadow-md space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="bg-stone-900 border border-stone-800 text-white p-4 sm:p-5 rounded-3xl shadow-lg space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Eye className="w-4 h-4 text-[#DF3B68]" />
-              <span className="text-xs font-bold uppercase tracking-wider text-stone-300">
-                Mode Pratinjau Super Admin:
-              </span>
+              <div className="w-8 h-8 rounded-xl bg-[#DF3B68]/20 flex items-center justify-center text-[#DF3B68]">
+                <SlidersHorizontal className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-white">
+                  Panel Pratinjau Super Admin
+                </p>
+                <p className="text-[11px] text-stone-400">
+                  Ubah sudut pandang dashboard untuk menguji tampilan setiap level jabatan.
+                </p>
+              </div>
             </div>
             
-            {/* Pilihan Level Perspektif */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-stone-800 p-1 rounded-2xl">
+            {/* Pilihan 4 Perspektif Jabatan */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-stone-800/80 p-1.5 rounded-2xl border border-stone-700/60">
               {[
                 { id: 'STAF', label: 'Staf' },
                 { id: 'KEPALA_SEKSI', label: 'Kepala Seksi' },
@@ -371,10 +374,10 @@ export default function DashboardPage() {
                 <button
                   key={tab.id}
                   onClick={() => setActivePerspective(tab.id as DashboardPerspective)}
-                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                     activePerspective === tab.id
-                      ? 'bg-[#DF3B68] text-white shadow-sm'
-                      : 'text-stone-400 hover:text-white'
+                      ? 'bg-[#DF3B68] text-white shadow-md'
+                      : 'text-stone-400 hover:text-white hover:bg-stone-700/50'
                   }`}
                 >
                   {tab.label}
@@ -383,14 +386,14 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Unit Switcher jika ingin simulasi unit tertentu */}
+          {/* Pemilih Simulasi Unit Kerja */}
           {activePerspective !== 'KEPALA_KANWIL' && unitList.length > 0 && (
-            <div className="flex items-center gap-2 pt-2 border-t border-stone-800 text-xs">
-              <span className="text-stone-400">Simulasikan Unit:</span>
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-800 text-xs">
+              <span className="text-stone-400 font-medium">Simulasi Unit Kerja:</span>
               <select
                 value={simulatedUnitId}
                 onChange={(e) => setSimulatedUnitId(e.target.value)}
-                className="bg-stone-800 text-stone-200 px-3 py-1 rounded-xl border border-stone-700 text-xs focus:outline-none"
+                className="bg-stone-800 text-stone-200 px-3 py-1.5 rounded-xl border border-stone-700 text-xs focus:outline-none focus:ring-1 focus:ring-[#DF3B68]"
               >
                 {unitList.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -413,7 +416,7 @@ export default function DashboardPage() {
               {activePerspective === 'KEPALA_UNIT' && 'Executive Health Scorecard'}
               {activePerspective === 'KEPALA_KANWIL' && 'Regional Command Center Kanwil'}
             </h1>
-            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200">
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#DF3B68]/10 text-[#DF3B68] border border-[#DF3B68]/20">
               {activePerspective}
             </span>
           </div>
@@ -471,7 +474,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ========================================================= */}
-      {/* KONTEN LEVEL 1: STAF (HANYA TABEL TUGAS PRIBADI, NO CHARTS) */}
+      {/* PERSPEKTIF 1: STAF (FOKUS TUGAS PRIBADI, TANPA GRAFIK BEBAN) */}
       {/* ========================================================= */}
       {activePerspective === 'STAF' && (
         <div className="space-y-6">
@@ -483,7 +486,7 @@ export default function DashboardPage() {
       )}
 
       {/* ========================================================= */}
-      {/* KONTEN LEVEL 2: KEPALA SEKSI (WORKLOAD STAF & RADAR KENDALA) */}
+      {/* PERSPEKTIF 2: KEPALA SEKSI (WORKLOAD STAF & RADAR KENDALA) */}
       {/* ========================================================= */}
       {activePerspective === 'KEPALA_SEKSI' && (
         <div className="space-y-6">
@@ -518,11 +521,10 @@ export default function DashboardPage() {
       )}
 
       {/* ========================================================= */}
-      {/* KONTEN LEVEL 3: KEPALA KANTOR (MATRIKS PERFORMA ANTAR-SEKSI) */}
+      {/* PERSPEKTIF 3: KEPALA KANTOR (MATRIKS PERFORMA ANTAR-SEKSI) */}
       {/* ========================================================= */}
       {activePerspective === 'KEPALA_UNIT' && (
         <div className="space-y-6">
-          {/* Matriks Antar Seksi */}
           <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -573,7 +575,7 @@ export default function DashboardPage() {
       )}
 
       {/* ========================================================= */}
-      {/* KONTEN LEVEL 4: KEPALA KANWIL (LEADERBOARD REGIONAL SATKER) */}
+      {/* PERSPEKTIF 4: KEPALA KANWIL (LEADERBOARD REGIONAL SATKER) */}
       {/* ========================================================= */}
       {activePerspective === 'KEPALA_KANWIL' && (
         <div className="space-y-6">
