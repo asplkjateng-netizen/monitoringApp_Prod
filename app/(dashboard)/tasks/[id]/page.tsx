@@ -17,7 +17,8 @@ import {
   Loader2,
   Edit3,
   CalendarDays,
-  Info
+  Info,
+  BookOpen
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -32,8 +33,9 @@ export default function TaskDetailPage() {
   const [pics, setPics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // States Subtask
+  // States Tambah Subtask Baru (Termasuk Batas Waktu Opsional)
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [newSubtaskDeadline, setNewSubtaskDeadline] = useState('');
   const [addingSubtask, setAddingSubtask] = useState(false);
 
   // States Form Kontrol Cepat & Status
@@ -79,7 +81,7 @@ export default function TaskDetailPage() {
     setEvidenceLinkInput(taskData.evidence_link || '');
     setKendalaInput(taskData.kendala_note || '');
 
-    // 2. Ambil Subtasks
+    // 2. Ambil Subtasks (termasuk kolom deadline)
     const { data: subData, error: subError } = await supabase
       .from('subtasks')
       .select('*')
@@ -103,18 +105,15 @@ export default function TaskDetailPage() {
     setLoading(false);
   };
 
-  // Helper Warna Progress Bar
   const getProgressBarColor = (pct: number) => {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 31) return 'bg-amber-400';
     return 'bg-rose-500';
   };
 
-  // Toggle Subtask dengan Otomasi Status Default
   const handleToggleSubtask = async (subtaskId: string, currentStatusVal: boolean) => {
     const nextVal = !currentStatusVal;
 
-    // Hitung proyeksi status lokal
     const updatedSubtasks = subtasks.map((s) =>
       s.id === subtaskId ? { ...s, is_completed: nextVal } : s
     );
@@ -122,7 +121,6 @@ export default function TaskDetailPage() {
     const completed = updatedSubtasks.filter((s) => s.is_completed).length;
     const calcProgress = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-    // Tentukan status otomatis jika bukan sedang terkendala
     let nextStatus = currentStatus;
     if (currentStatus !== 'TERKENDALA') {
       if (completed === total) {
@@ -134,7 +132,6 @@ export default function TaskDetailPage() {
       }
     }
 
-    // 1. Simpan perubahan subtask
     const { error: subtaskErr } = await supabase
       .from('subtasks')
       .update({ is_completed: nextVal, updated_at: new Date().toISOString() })
@@ -145,7 +142,6 @@ export default function TaskDetailPage() {
       return;
     }
 
-    // 2. Sinkronkan progres dan status otomatis ke database
     await supabase
       .from('tasks')
       .update({
@@ -167,10 +163,15 @@ export default function TaskDetailPage() {
     await loadTaskDetails();
   };
 
-  // Tambah Subtask
+  // Tambah Subtask dengan Validasi Deadline Opsional
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtaskTitle.trim()) return;
+
+    if (newSubtaskDeadline && currentDeadline && newSubtaskDeadline > currentDeadline) {
+      setErrorMsg(`Batas waktu tahapan (${newSubtaskDeadline}) tidak boleh melebihi batas waktu tugas utama (${currentDeadline}).`);
+      return;
+    }
 
     setAddingSubtask(true);
     setErrorMsg('');
@@ -180,6 +181,7 @@ export default function TaskDetailPage() {
       .insert({
         task_id: taskId,
         title: newSubtaskTitle.trim(),
+        deadline: newSubtaskDeadline || null,
         is_completed: false,
         evidence_link_type: 'INHERIT',
       });
@@ -188,12 +190,12 @@ export default function TaskDetailPage() {
       setErrorMsg('Gagal menyimpan subtask: ' + error.message);
     } else {
       setNewSubtaskTitle('');
+      setNewSubtaskDeadline('');
       await loadTaskDetails();
     }
     setAddingSubtask(false);
   };
 
-  // Hapus Subtask
   const handleDeleteSubtask = async (subtaskId: string) => {
     const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId);
     if (error) {
@@ -203,13 +205,11 @@ export default function TaskDetailPage() {
     }
   };
 
-  // Handler saat status diubah manual oleh pengguna
   const handleManualStatusChange = (val: string) => {
     setCurrentStatus(val);
     setManualNotice(`Perhatian: Anda mengubah status secara manual menjadi "${val}". Klik tombol "Simpan Pembaruan Tugas" untuk menerapkan.`);
   };
 
-  // Simpan Seluruh Perubahan Cepat (Status, Deadline, Prioritas, Bukti & Kendala)
   const handleSaveChanges = async () => {
     setSavingChanges(true);
     setErrorMsg('');
@@ -239,10 +239,8 @@ export default function TaskDetailPage() {
     if (error) {
       setErrorMsg('Gagal menyimpan perubahan: ' + error.message);
     } else {
-      // [BACKLOG-1] Otomasi Notifikasi Status Terkendala
       if (isNewlyTerkendala) {
         try {
-          // Cari atasan unit (KEPALA_SEKSI, KEPALA_UNIT, SUPER_ADMIN)
           const { data: leaders } = await supabase
             .from('profiles')
             .select('id')
@@ -252,8 +250,6 @@ export default function TaskDetailPage() {
           const targetUserIds = new Set<string>();
           if (leaders) leaders.forEach((l) => targetUserIds.add(l.id));
           if (task.created_by) targetUserIds.add(task.created_by);
-
-          // Masukkan juga seluruh PIC pelaksana agar saling terkoordinasi
           pics.forEach((p) => targetUserIds.add(p.id));
 
           if (targetUserIds.size > 0) {
@@ -279,7 +275,6 @@ export default function TaskDetailPage() {
     setSavingChanges(false);
   };
 
-  // Hapus Tugas
   const handleDeleteTask = async () => {
     if (!confirm('Apakah Anda yakin ingin menghapus tugas ini? Seluruh sub-pekerjaan dan penugasan PIC akan ikut terhapus.')) {
       return;
@@ -297,7 +292,6 @@ export default function TaskDetailPage() {
     }
   };
 
-  // Helper Badge Hari
   const getDeadlineStatusBadge = () => {
     if (!task) return null;
     if (task.status === 'SELESAI') {
@@ -356,7 +350,7 @@ export default function TaskDetailPage() {
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
-      {/* Top Bar Navigasi & Aksi CRUD */}
+      {/* Top Bar Navigasi & Aksi */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/tasks"
@@ -385,7 +379,6 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Alert Error / Sukses / Notifikasi Manual */}
       {errorMsg && (
         <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
           <ShieldAlert className="w-4 h-4 flex-shrink-0" />
@@ -452,10 +445,25 @@ export default function TaskDetailPage() {
           </p>
         )}
 
+        {/* Dasar Hukum & Link Tautan Regulasi */}
         {task.legal_basis && (
-          <div className="text-xs text-stone-500">
-            <span className="font-semibold text-stone-700">Dasar Hukum: </span>
-            {task.legal_basis}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
+            <span className="font-semibold text-stone-800">Dasar Hukum:</span>
+            <span className="bg-stone-100 px-2.5 py-1 rounded-lg font-mono text-stone-700 border border-stone-200">
+              {task.legal_basis}
+            </span>
+            {task.legal_basis_link && (
+              <a
+                href={task.legal_basis_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-lg border border-blue-200 transition-colors"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                <span>Buka Dokumen Regulasi</span>
+                <ExternalLink className="w-3 h-3 text-blue-500" />
+              </a>
+            )}
           </div>
         )}
 
@@ -470,7 +478,7 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* Dynamic Multi-Color Progress Bar */}
+        {/* Progress Bar */}
         <div className="pt-2 space-y-1.5">
           <div className="flex justify-between text-xs font-semibold text-stone-700">
             <span>Kalkulasi Progres Pelaksanaan</span>
@@ -485,7 +493,7 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Subtasks (Kiri) & Kontrol Status (Kanan) */}
+      {/* Subtasks (Kiri) & Kontrol Cepat (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Kolom Subtasks */}
@@ -500,7 +508,8 @@ export default function TaskDetailPage() {
             </span>
           </div>
 
-          <form onSubmit={handleAddSubtask} className="flex gap-2">
+          {/* Form Tambah Subtask dengan Opsi Batas Waktu */}
+          <form onSubmit={handleAddSubtask} className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               placeholder="Ketik tahapan/sub-pekerjaan baru..."
@@ -508,16 +517,27 @@ export default function TaskDetailPage() {
               onChange={(e) => setNewSubtaskTitle(e.target.value)}
               className="flex-1 px-3.5 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
             />
-            <button
-              type="submit"
-              disabled={addingSubtask || !newSubtaskTitle.trim()}
-              className="px-4 py-2 bg-stone-900 text-white rounded-xl hover:bg-stone-800 disabled:bg-stone-300 transition-colors text-xs font-semibold flex items-center gap-1"
-            >
-              {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-              Tambah
-            </button>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                max={currentDeadline || undefined}
+                value={newSubtaskDeadline}
+                onChange={(e) => setNewSubtaskDeadline(e.target.value)}
+                className="px-2.5 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 font-mono"
+                title="Batas waktu tahapan (opsional, maks = deadline tugas utama)"
+              />
+              <button
+                type="submit"
+                disabled={addingSubtask || !newSubtaskTitle.trim()}
+                className="px-4 py-2 bg-stone-900 text-white rounded-xl hover:bg-stone-800 disabled:bg-stone-300 transition-colors text-xs font-semibold flex items-center gap-1"
+              >
+                {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                Tambah
+              </button>
+            </div>
           </form>
 
+          {/* List Subtasks */}
           <div className="divide-y divide-stone-100 pt-1">
             {subtasks.length === 0 ? (
               <div className="py-8 text-center text-xs text-stone-400">
@@ -537,13 +557,22 @@ export default function TaskDetailPage() {
                       {idx + 1}. {st.title}
                     </span>
                   </label>
-                  <button
-                    onClick={() => handleDeleteSubtask(st.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-rose-600 transition-opacity"
-                    title="Hapus tahapan"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {st.deadline && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200" title="Batas waktu tahapan ini">
+                        Batas: {st.deadline}
+                      </span>
+                    )}
+
+                    <button
+                      onClick={() => handleDeleteSubtask(st.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-rose-600 transition-opacity"
+                      title="Hapus tahapan"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -555,7 +584,6 @@ export default function TaskDetailPage() {
           <div className="space-y-4">
             <h2 className="font-bold text-stone-900 text-base">Status & Validasi Bukti</h2>
 
-            {/* Selector Status Manual dengan Trigger Notifikasi */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
                 Ubah Status Pekerjaan:
@@ -572,7 +600,6 @@ export default function TaskDetailPage() {
               </select>
             </div>
 
-            {/* Input Link Bukti */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
                 Link Bukti Dukung (Google Drive / Cloud)
@@ -584,7 +611,7 @@ export default function TaskDetailPage() {
                   placeholder="https://drive.google.com/..."
                   value={evidenceLinkInput}
                   onChange={(e) => setEvidenceLinkInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 font-mono"
                 />
               </div>
               {task.evidence_link && (
@@ -599,7 +626,6 @@ export default function TaskDetailPage() {
               )}
             </div>
 
-            {/* Input Catatan Kendala */}
             <div>
               <label className="block text-xs font-semibold text-stone-700 mb-1">
                 Catatan / Kendala {currentStatus === 'TERKENDALA' && <span className="text-rose-500">*</span>}
@@ -614,7 +640,6 @@ export default function TaskDetailPage() {
             </div>
           </div>
 
-          {/* Tombol Simpan Perubahan Cepat */}
           <div className="space-y-2 pt-4 border-t border-stone-100">
             <button
               onClick={handleSaveChanges}
