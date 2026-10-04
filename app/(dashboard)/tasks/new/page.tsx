@@ -14,7 +14,6 @@ import {
   AlertCircle, 
   BookmarkPlus, 
   Clock, 
-  CalendarCheck2,
   Info,
   Calendar
 } from 'lucide-react';
@@ -107,8 +106,8 @@ export default function NewTaskPage() {
         targetMonth = selectedMonth;
       }
     } else if (periodType === 'TRIWULANAN') {
-      const quarterEndMonth = selectedQuarter * 3; // TW1: 3 (Mar), TW2: 6 (Jun), TW3: 9 (Sep), TW4: 12 (Des)
-      const quarterStartMonth = (selectedQuarter - 1) * 3 + 1; // TW1: 1 (Jan), TW2: 4 (Apr), TW3: 7 (Jul), TW4: 10 (Okt)
+      const quarterEndMonth = selectedQuarter * 3;
+      const quarterStartMonth = (selectedQuarter - 1) * 3 + 1;
 
       if (deadlineRule === 'END_OF_PERIOD') {
         targetMonth = quarterEndMonth;
@@ -157,7 +156,7 @@ export default function NewTaskPage() {
 
   const getPeriodMonthValue = (): number => {
     if (periodType === 'BULANAN') return selectedMonth;
-    if (periodType === 'TRIWULANAN') return selectedQuarter * 3; // simpan bulan akhir TW (3, 6, 9, 12)
+    if (periodType === 'TRIWULANAN') return selectedQuarter * 3;
     if (periodType === 'SEMESTERAN') return selectedSemester === 1 ? 6 : 12;
     if (periodType === 'TAHUNAN') return 12;
     return new Date().getMonth() + 1;
@@ -210,8 +209,12 @@ export default function NewTaskPage() {
 
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
-    if (!templateId) return;
+    if (!templateId) {
+      setSaveAsTemplate(true);
+      return;
+    }
 
+    setSaveAsTemplate(false);
     const tpl = templates.find((t) => t.id === templateId);
     if (tpl) {
       setTitle(tpl.title);
@@ -266,8 +269,8 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // 1. Simpan template jika diminta
-      if (saveAsTemplate || (periodType !== 'INSIDENTIL' && !createdTemplateId)) {
+      // 1. Simpan ke Katalog Tusi jika dicentang dan bukan berasal dari template yang sudah ada
+      if (saveAsTemplate && !createdTemplateId) {
         const { data: newTpl, error: tplError } = await supabase
           .from('task_templates')
           .insert({
@@ -289,7 +292,7 @@ export default function NewTaskPage() {
         }
       }
 
-      // 2. Simpan Tugas Riil Periode Terpilih
+      // 2. Simpan Tugas Riil Operasional Periode Terpilih
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -316,7 +319,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan PIC
+      // 3. Simpan PIC Pelaksana
       if (selectedPics.length > 0) {
         const picPayloads = selectedPics.map((picUserId) => ({
           task_id: taskId,
@@ -334,7 +337,7 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks
+      // 4. Simpan Subtasks Awal
       const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
@@ -410,27 +413,38 @@ export default function NewTaskPage() {
 
         {/* Informasi Pokok */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
               <FileText className="w-4 h-4 text-[#DF3B68]" />
               <span>Rincian Informasi Tugas</span>
             </div>
-            {periodType !== 'INSIDENTIL' ? (
-              <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
-                Otomasi Pembangkitan Rutin Aktif
-              </span>
-            ) : (
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl">
-                <input
-                  type="checkbox"
-                  checked={saveAsTemplate}
-                  onChange={(e) => setSaveAsTemplate(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded text-[#DF3B68] focus:ring-[#DF3B68]"
-                />
-                <BookmarkPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
-                <span>Simpan ke Bank Tusi</span>
-              </label>
-            )}
+
+            {/* OPSI SIMPAN KE KATALOG TUSI & STATUS SIKLUS */}
+            <div className="flex flex-wrap items-center gap-2">
+              {periodType !== 'INSIDENTIL' && (
+                <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
+                  Otomasi Pembangkitan Rutin Aktif
+                </span>
+              )}
+
+              {!selectedTemplateId ? (
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1 rounded-xl transition-colors shadow-2xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={saveAsTemplate}
+                    onChange={(e) => setSaveAsTemplate(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded text-[#DF3B68] focus:ring-[#DF3B68] cursor-pointer"
+                  />
+                  <BookmarkPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
+                  <span>Simpan ke Master Katalog Tusi</span>
+                </label>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  Katalog Tusi Terpilih
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="space-y-4">
