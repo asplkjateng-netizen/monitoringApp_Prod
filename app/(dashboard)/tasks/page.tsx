@@ -11,14 +11,29 @@ import {
   AlertCircle, 
   ExternalLink,
   Building2,
-  FileText
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  CheckSquare,
+  Square,
+  Layers
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+
+interface SubtaskItem {
+  id: string;
+  task_id: string;
+  title: string;
+  is_completed: boolean;
+  custom_evidence_link?: string;
+}
 
 interface TaskItem {
   id: string;
   unit_id: string;
   title: string;
+  description?: string;
+  legal_basis?: string;
   deadline: string;
   status: 'BELUM_DIKERJAKAN' | 'ON_PROGRESS' | 'TERKENDALA' | 'SELESAI';
   priority: 'TINGGI' | 'SEDANG' | 'RENDAH';
@@ -34,6 +49,7 @@ interface TaskItem {
     name: string;
     level: string;
   };
+  subtasks?: SubtaskItem[];
 }
 
 interface UnitOption {
@@ -45,7 +61,6 @@ interface UnitOption {
 function TasksContent() {
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get('status') || 'ALL';
-  // Default filter periode sekarang adalah 'ALL' (Semua Periode)
   const periodParam = searchParams.get('period') || 'ALL';
 
   const supabase = createClient();
@@ -53,6 +68,9 @@ function TasksContent() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
+
+  // Expandable subtasks state
+  const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
 
   // Role & Multi-Unit State
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -106,10 +124,9 @@ function TasksContent() {
 
     let query = supabase
       .from('tasks')
-      .select('*, unit:units(id, name, level)')
+      .select('*, unit:units(id, name, level), subtasks(*)')
       .order('deadline', { ascending: true });
 
-    // Filter Unit berdasarkan pilihan
     if (selectedUnitFilter === 'MY_UNIT') {
       query = query.eq('unit_id', userUnitId);
     } else if (selectedUnitFilter !== 'ALL_UNITS') {
@@ -123,7 +140,12 @@ function TasksContent() {
     setLoading(false);
   };
 
-  // Parsing tanggal aman dari pergeseran zona waktu
+  const toggleExpand = (taskId: string) => {
+    setExpandedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
   const parseSafeDate = (dateStr: string) => {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, (m || 1) - 1, d || 1);
@@ -137,13 +159,17 @@ function TasksContent() {
     return Math.round((dDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
 
+  const getEffectiveProgress = (task: TaskItem): number => {
+    if (task.status === 'SELESAI') return 100;
+    return task.progress_pct || 0;
+  };
+
   const getProgressBarColor = (pct: number) => {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 31) return 'bg-amber-400';
     return 'bg-rose-500';
   };
 
-  // Helper resolusi bulan tugas yang akurat
   const getTaskMonth = (t: TaskItem): number => {
     if (t.period_month && t.period_month >= 1 && t.period_month <= 12) {
       return t.period_month;
@@ -158,7 +184,6 @@ function TasksContent() {
     return new Date().getMonth() + 1;
   };
 
-  // Filter Tasks berdasarkan Search, Status Tab, dan Siklus Periode dari Topbar
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
       t.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -166,7 +191,6 @@ function TasksContent() {
       
     if (!matchesSearch) return false;
 
-    // Filter Status
     if (statusFilter !== 'ALL') {
       if (statusFilter === 'KRITIS') {
         const diffDays = getDaysDiff(t.deadline);
@@ -177,59 +201,34 @@ function TasksContent() {
       }
     }
 
-    // Filter Siklus Periode (Sinkronisasi Cerdas dengan Topbar)
     const taskMonth = getTaskMonth(t);
     const currentMonth = new Date().getMonth() + 1;
 
     switch (periodParam) {
       case 'CURRENT_MONTH': {
-        // 1. Tugas bulanan / insidentil yang tepat di bulan berjalan
         if (taskMonth === currentMonth) return true;
-
-        // 2. Tugas Triwulanan yang aktif pada triwulan bulan berjalan saat ini
         if (t.period_type === 'TRIWULANAN') {
           const currentQuarter = Math.ceil(currentMonth / 3);
           const taskQuarter = Math.ceil(taskMonth / 3);
           if (currentQuarter === taskQuarter) return true;
         }
-
-        // 3. Tugas Semesteran yang aktif pada semester bulan berjalan saat ini
         if (t.period_type === 'SEMESTERAN') {
           const currentSemester = currentMonth <= 6 ? 1 : 2;
           const taskSemester = taskMonth <= 6 ? 1 : 2;
           if (currentSemester === taskSemester) return true;
         }
-
-        // 4. Tugas Tahunan selalu relevan sepanjang tahun berjalan
         if (t.period_type === 'TAHUNAN') return true;
-
         return false;
       }
-
-      case 'TW_1':
-        return [1, 2, 3].includes(taskMonth);
-
-      case 'TW_2':
-        return [4, 5, 6].includes(taskMonth);
-
-      case 'TW_3':
-        return [7, 8, 9].includes(taskMonth);
-
-      case 'TW_4':
-        return [10, 11, 12].includes(taskMonth);
-
-      case 'SEMESTER_1':
-        return [1, 2, 3, 4, 5, 6].includes(taskMonth);
-
-      case 'SEMESTER_2':
-        return [7, 8, 9, 10, 11, 12].includes(taskMonth);
-
-      case 'TAHUNAN':
-        return t.period_type === 'TAHUNAN';
-
+      case 'TW_1': return [1, 2, 3].includes(taskMonth);
+      case 'TW_2': return [4, 5, 6].includes(taskMonth);
+      case 'TW_3': return [7, 8, 9].includes(taskMonth);
+      case 'TW_4': return [10, 11, 12].includes(taskMonth);
+      case 'SEMESTER_1': return [1, 2, 3, 4, 5, 6].includes(taskMonth);
+      case 'SEMESTER_2': return [7, 8, 9, 10, 11, 12].includes(taskMonth);
+      case 'TAHUNAN': return t.period_type === 'TAHUNAN';
       case 'ALL':
       default:
-        // Menampilkan seluruh tugas tanpa menyembunyikan triwulanan/semesteran
         return true;
     }
   });
@@ -300,11 +299,9 @@ function TasksContent() {
         </Link>
       </div>
 
-      {/* FILTER BAR DENGAN DROPDOWN UNIT KHUSUS SUPER ADMIN */}
+      {/* FILTER BAR */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200/70 shadow-sm">
-        
         <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          {/* Input Pencarian */}
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
@@ -316,7 +313,6 @@ function TasksContent() {
             />
           </div>
 
-          {/* Pemilih Unit (Khusus Super Admin & Kanwil) */}
           {isSuperAdmin && (
             <div className="flex items-center gap-1.5">
               <Building2 className="w-4 h-4 text-stone-400 hidden sm:block" />
@@ -337,7 +333,6 @@ function TasksContent() {
           )}
         </div>
 
-        {/* Status Filter Tabs */}
         <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
           {[
             { id: 'ALL', label: 'Semua' },
@@ -377,76 +372,154 @@ function TasksContent() {
           </div>
         ) : (
           <div className="divide-y divide-stone-100">
-            {filteredTasks.map((task) => (
-              <div
-                key={task.id}
-                className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-stone-50/60 transition-colors"
-              >
-                <div className="space-y-2 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {getUrgencyBadge(task)}
-                    {getStatusBadge(task.status)}
-                    
-                    {/* Badge Unit Kerja Pemilik Tugas */}
-                    {task.unit && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 text-stone-700 px-2 py-0.5 rounded-md border border-stone-200">
-                        <Building2 className="w-3 h-3 text-stone-500" />
-                        {task.unit.name}
-                      </span>
-                    )}
+            {filteredTasks.map((task) => {
+              const isExpanded = expandedTaskIds.includes(task.id);
+              const progressPct = getEffectiveProgress(task);
+              const subtasksCount = task.subtasks?.length || 0;
 
-                    <span className="text-[11px] font-semibold text-stone-600 bg-stone-50 px-2 py-0.5 rounded-md border border-stone-200">
-                      {task.priority}
-                    </span>
-                    <span className="text-xs text-stone-400 flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" />
-                      Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </span>
-                  </div>
+              return (
+                <div key={task.id} className="transition-colors hover:bg-stone-50/40">
+                  <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getUrgencyBadge(task)}
+                        {getStatusBadge(task.status)}
+                        
+                        {task.unit && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 text-stone-700 px-2 py-0.5 rounded-md border border-stone-200">
+                            <Building2 className="w-3 h-3 text-stone-500" />
+                            {task.unit.name}
+                          </span>
+                        )}
 
-                  <h3 className="font-semibold text-stone-900 text-base">{task.title}</h3>
-                  
-                  {task.kendala_note && task.status === 'TERKENDALA' && (
-                    <p className="text-xs text-rose-600 bg-rose-50 p-2 rounded-xl border border-rose-100">
-                      <strong>Hambatan/Kendala:</strong> {task.kendala_note}
-                    </p>
-                  )}
+                        <span className="text-[11px] font-semibold text-stone-600 bg-stone-50 px-2 py-0.5 rounded-md border border-stone-200">
+                          {task.priority}
+                        </span>
+                        <span className="text-xs text-stone-400 flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                      </div>
 
-                  <div className="flex items-center gap-3 pt-1 max-w-xs">
-                    <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(task.progress_pct || 0)}`}
-                        style={{ width: `${task.progress_pct || 0}%` }}
-                      />
+                      <h3 className="font-semibold text-stone-900 text-base">{task.title}</h3>
+                      
+                      {task.kendala_note && task.status === 'TERKENDALA' && (
+                        <p className="text-xs text-rose-600 bg-rose-50 p-2 rounded-xl border border-rose-100">
+                          <strong>Hambatan/Kendala:</strong> {task.kendala_note}
+                        </p>
+                      )}
+
+                      {/* Progress Bar (Otomatis 100% jika Selesai) */}
+                      <div className="flex items-center gap-3 pt-1 max-w-xs">
+                        <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-semibold text-stone-600">{progressPct}%</span>
+                      </div>
                     </div>
-                    <span className="text-xs font-semibold text-stone-600">{task.progress_pct || 0}%</span>
+
+                    <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
+                      {/* Tombol Buka/Tutup Sub-pekerjaan & Detail Langsung di Sini */}
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(task.id)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
+                          isExpanded 
+                            ? 'bg-stone-900 text-white border-stone-900' 
+                            : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
+                        <span>Sub-tugas ({subtasksCount})</span>
+                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </button>
+
+                      {/* Akses Cepat Link Bukti */}
+                      {task.evidence_link && (
+                        <a
+                          href={task.evidence_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-[#DF3B68] bg-[#DF3B68]/10 hover:bg-[#DF3B68]/20 transition-colors"
+                          title="Buka Dokumen Bukti Penyelesaian di Google Drive / Cloud"
+                        >
+                          <FileText className="w-3.5 h-3.5" /> Bukti
+                        </a>
+                      )}
+
+                      {/* Link Lengkap ke Halaman Detail & Edit / Hapus */}
+                      <Link
+                        href={`/tasks/${task.id}`}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
+                      >
+                        Detail & Sub-tugas
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
-                  {/* Akses Cepat Link Bukti */}
-                  {task.evidence_link && (
-                    <a
-                      href={task.evidence_link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-[#DF3B68] bg-[#DF3B68]/10 hover:bg-[#DF3B68]/20 transition-colors"
-                      title="Buka Dokumen Bukti Penyelesaian di Google Drive / Cloud"
-                    >
-                      <FileText className="w-3.5 h-3.5" /> Bukti
-                    </a>
+                  {/* ========================================================= */}
+                  {/* EXPANDED ACCORDION: RINCIAN & CHECKLIST SUB-PEKERJAAN     */}
+                  {/* ========================================================= */}
+                  {isExpanded && (
+                    <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
+                      {/* Deskripsi & Dasar Hukum */}
+                      {(task.description || task.legal_basis) && (
+                        <div className="p-3 bg-white rounded-2xl border border-stone-200/80 space-y-1 text-xs">
+                          {task.legal_basis && (
+                            <p className="text-stone-500 font-mono text-[11px]">
+                              <strong>Dasar Hukum:</strong> {task.legal_basis}
+                            </p>
+                          )}
+                          {task.description && (
+                            <p className="text-stone-700 leading-relaxed">{task.description}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Checklist Sub-pekerjaan */}
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
+                          <span>Tahapan Sub-Pekerjaan:</span>
+                        </p>
+
+                        {!task.subtasks || task.subtasks.length === 0 ? (
+                          <div className="p-3 bg-white rounded-xl border border-stone-200 text-xs text-stone-400 italic">
+                            Belum ada sub-pekerjaan yang direkam untuk tugas ini.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {task.subtasks.map((st, idx) => (
+                              <div
+                                key={st.id || idx}
+                                className={`p-2.5 rounded-xl border text-xs flex items-center gap-2.5 transition-colors ${
+                                  st.is_completed
+                                    ? 'bg-emerald-50/60 border-emerald-200 text-emerald-800'
+                                    : 'bg-white border-stone-200 text-stone-700'
+                                }`}
+                              >
+                                {st.is_completed ? (
+                                  <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-stone-400 shrink-0" />
+                                )}
+                                <span className={`truncate flex-1 ${st.is_completed ? 'line-through text-stone-400 font-medium' : 'font-medium'}`}>
+                                  {idx + 1}. {st.title}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
-
-                  <Link
-                    href={`/tasks/${task.id}`}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
-                  >
-                    Detail & Sub-tugas
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
