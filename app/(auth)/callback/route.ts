@@ -6,6 +6,7 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const next = searchParams.get('next') || '/dashboard';
+  const verified = searchParams.get('verified');
 
   if (code) {
     const cookieStore = await cookies();
@@ -32,10 +33,14 @@ export async function GET(request: Request) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      const redirectUrl = new URL(next, origin);
+      if (verified) {
+        redirectUrl.searchParams.set('verified', 'true');
+      }
+      return NextResponse.redirect(redirectUrl.toString());
     }
   }
 
-  // Jika gagal atau kode tidak valid, arahkan ke login dengan indikator error
+  // Jika gagal atau kode tidak valid
   return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
 }
