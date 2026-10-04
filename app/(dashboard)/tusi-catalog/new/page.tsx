@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Clock } from 'lucide-react';
+import { ArrowLeft, Clock, Info } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -15,17 +15,42 @@ export default function NewTusiPage() {
 
   const [title, setTitle] = useState('');
   const [tusiType, setTusiType] = useState('MSKI');
-  const [periodType, setPeriodType] = useState<PeriodType>('BULANAN');
+  const [periodType, setPeriodType] = useState<PeriodType>('TRIWULANAN');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
 
-  // Aturan Siklus Formula
-  const [deadlineRule, setDeadlineRule] = useState<string>('END_OF_PERIOD');
-  const [exactDay, setExactDay] = useState<number>(31);
+  // Aturan Siklus Formula Fleksibel
+  const [deadlineRule, setDeadlineRule] = useState<string>('NEXT_MONTH_DATE');
+  const [exactDay, setExactDay] = useState<number>(15);
+  const [customDayInput, setCustomDayInput] = useState<string>('15');
   const [isRecurring, setIsRecurring] = useState<boolean>(true);
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const getCyclePreviewSimulation = () => {
+    const dayStr = exactDay >= 31 ? 'Akhir Bulan' : `Tanggal ${exactDay}`;
+    if (periodType === 'TRIWULANAN') {
+      if (deadlineRule === 'NEXT_MONTH_DATE') {
+        return `Simulasi: TW I → ${dayStr} April • TW II → ${dayStr} Juli • TW III → ${dayStr} Oktober • TW IV → ${dayStr} Januari (Thn Depan)`;
+      } else if (deadlineRule === 'END_OF_PERIOD') {
+        return `Simulasi: TW I → ${dayStr} Maret • TW II → ${dayStr} Juni • TW III → ${dayStr} September • TW IV → ${dayStr} Desember`;
+      } else {
+        return `Simulasi: TW I → ${dayStr} Januari • TW II → ${dayStr} April • TW III → ${dayStr} Juli • TW IV → ${dayStr} Oktober`;
+      }
+    } else if (periodType === 'SEMESTERAN') {
+      if (deadlineRule === 'NEXT_MONTH_DATE') {
+        return `Simulasi: Semester I → ${dayStr} Juli • Semester II → ${dayStr} Januari (Thn Depan)`;
+      } else {
+        return `Simulasi: Semester I → ${dayStr} Juni • Semester II → ${dayStr} Desember`;
+      }
+    } else if (periodType === 'BULANAN') {
+      return deadlineRule === 'NEXT_MONTH_DATE'
+        ? `Simulasi: Periode berjalan → ${dayStr} di bulan berikutnya (M+1)`
+        : `Simulasi: Periode berjalan → ${dayStr} di bulan berkenaan`;
+    }
+    return '';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,7 +104,7 @@ export default function NewTusiPage() {
             Master Bank Data
           </span>
           <h1 className="text-xl font-bold text-stone-900 mt-2">Buat Master Template Tusi</h1>
-          <p className="text-xs text-stone-500 mt-1">Daftarkan standar tugas agar bisa diadopsi oleh seksi sejenis dan dibangkitkan otomatis</p>
+          <p className="text-xs text-stone-500 mt-1">Daftarkan standar tugas agar bisa diadopsi dan dibangkitkan otomatis secara berkala.</p>
         </div>
 
         {errorMsg && (
@@ -89,7 +114,7 @@ export default function NewTusiPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input 
             label="Judul Tugas / Tusi *" 
-            placeholder="Misal: Telaah Laporan Keuangan BLU" 
+            placeholder="Misal: Telaah Laporan Keuangan BLU Triwulanan" 
             value={title} 
             onChange={(e) => setTitle(e.target.value)} 
             required 
@@ -123,7 +148,7 @@ export default function NewTusiPage() {
             </div>
           </div>
 
-          {/* Pengaturan Formula Tenggat Siklus */}
+          {/* Pengaturan Formula Tenggat Siklus Fleksibel */}
           {periodType !== 'INSIDENTIL' && (
             <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/80 space-y-3">
               <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
@@ -133,35 +158,68 @@ export default function NewTusiPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-stone-600 mb-1">Formula Batas:</label>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">1. Posisi Bulan Batas:</label>
                   <select
                     value={deadlineRule}
                     onChange={(e) => setDeadlineRule(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
                   >
-                    <option value="END_OF_PERIOD">Tepat di Akhir Periode (Contoh: TW I = 31 Maret)</option>
                     <option value="NEXT_MONTH_DATE">Bulan Berikutnya (M+1)</option>
-                    <option value="SAME_MONTH_DATE">Bulan Berjalan</option>
+                    <option value="END_OF_PERIOD">Bulan Terakhir Periode Berkenaan</option>
+                    <option value="SAME_MONTH_DATE">Awal Periode / Bulan Berjalan</option>
                   </select>
                 </div>
 
-                {deadlineRule !== 'END_OF_PERIOD' && (
-                  <div>
-                    <label className="block text-[11px] font-medium text-stone-600 mb-1">Batas Tanggal:</label>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal:</label>
+                  <div className="flex gap-2">
                     <select
-                      value={exactDay}
-                      onChange={(e) => setExactDay(Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                      value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
+                      onChange={(e) => {
+                        if (e.target.value === 'CUSTOM') {
+                          setExactDay(15);
+                          setCustomDayInput('15');
+                        } else {
+                          const val = Number(e.target.value);
+                          setExactDay(val);
+                          setCustomDayInput(String(val));
+                        }
+                      }}
+                      className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 bg-white text-xs"
                     >
-                      <option value={31}>Akhir Bulan</option>
-                      <option value={5}>Tanggal 5</option>
-                      <option value={10}>Tanggal 10</option>
-                      <option value={15}>Tanggal 15</option>
-                      <option value={20}>Tanggal 20</option>
-                      <option value={25}>Tanggal 25</option>
+                      <option value="31">Akhir Bulan (Max)</option>
+                      <option value="5">Tgl 5</option>
+                      <option value="10">Tgl 10</option>
+                      <option value="15">Tgl 15</option>
+                      <option value="20">Tgl 20</option>
+                      <option value="25">Tgl 25</option>
+                      <option value="CUSTOM">Bebas (Input)</option>
                     </select>
+
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      placeholder="Tgl 1-31"
+                      value={customDayInput}
+                      onChange={(e) => {
+                        setCustomDayInput(e.target.value);
+                        const val = Number(e.target.value);
+                        if (val >= 1 && val <= 31) setExactDay(val);
+                      }}
+                      className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center"
+                    />
                   </div>
-                )}
+                </div>
+              </div>
+
+              {/* Preview Box */}
+              <div className="p-2.5 bg-white rounded-xl border border-stone-200 text-xs text-stone-700 flex items-start gap-2">
+                <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-stone-900">Simulasi Pola Tenggat:</p>
+                  <p className="text-[11px] text-stone-600 mt-0.5">{getCyclePreviewSimulation()}</p>
+                </div>
               </div>
 
               <label className="flex items-center gap-2 cursor-pointer pt-1">
