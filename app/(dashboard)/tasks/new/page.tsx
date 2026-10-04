@@ -30,6 +30,7 @@ interface StaffProfile {
   full_name: string;
   nip: string;
   role: string;
+  unit_id?: string;
   unit?: {
     id: string;
     name: string;
@@ -191,104 +192,127 @@ export default function NewTaskPage() {
 
   const fetchInitialData = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    setUserId(user.id);
-
-    // Ambil profil user
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id, full_name, role, is_unit_admin, unit_id, unit:units(id, name, level, parent_id, tusi_type)')
-      .eq('id', user.id)
-      .single();
-
-    if (profile) {
-      const uId = profile.unit_id;
-      setUnitId(uId);
-      setUserUnitInfo(profile.unit);
-      const tusi = (profile.unit as any)?.tusi_type || 'UMUM';
-      setUserTusiType(tusi);
-
-      const roleUpper = String(profile.role || '').toUpperCase();
-      const adminFlag = roleUpper === 'SUPER_ADMIN';
-      const isLeader = ['KEPALA_UNIT', 'KEPALA_SEKSI'].includes(roleUpper) || profile.is_unit_admin === true || (profile.unit as any)?.level === 'ESELON_II';
-
-      setIsSuperAdmin(adminFlag);
-      setCanBroadcast(adminFlag || isLeader || true); // Izinkan broadcast untuk PIC
-
-      // Ambil daftar pegawai di unit ini (termasuk fallback jika belum ada pegawai lain)
-      let { data: staff } = await supabase
-        .from('profiles')
-        .select('id, full_name, nip, role')
-        .eq('unit_id', uId)
-        .order('full_name', { ascending: true });
-
-      if (!staff || staff.length === 0) {
-        // Fallback: sertakan setidaknya profil user sendiri
-        staff = [{
-          id: profile.id,
-          full_name: profile.full_name || 'Pegawai',
-          nip: (profile as any).nip || '-',
-          role: profile.role || 'STAF',
-        }];
+      if (!user) {
+        router.push('/login');
+        return;
       }
 
-      setStaffList(staff);
+      setUserId(user.id);
+
+      // 1. Ambil profil user secara aman
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*, unit:units(*)')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      let targetUnitId = profile?.unit_id;
+
+      // Fallback unit_id jika belum terhubung
+      if (!targetUnitId) {
+        const { data: firstUnit } = await supabase.from('units').select('id, name, level').limit(1).single();
+        if (firstUnit) targetUnitId = firstUnit.id;
+      }
+
+      setUnitId(targetUnitId || null);
+      setUserUnitInfo(profile?.unit || null);
+
+      const tusi = (profile?.unit as any)?.tusi_type || 'UMUM';
+      setUserTusiType(tusi);
+
+      const roleUpper = String(profile?.role || 'STAF').toUpperCase();
+      const adminFlag = roleUpper === 'SUPER_ADMIN';
+      setIsSuperAdmin(adminFlag);
+      setCanBroadcast(true);
+
+      // 2. Ambil seluruh pegawai di unit kerja ini untuk PIC Manual
+      let loadedStaff: StaffProfile[] = [];
+      if (targetUnitId) {
+        const { data: staffData } = await supabase
+          .from('profiles')
+          .select('id, full_name, nip, role, unit_id')
+          .eq('unit_id', targetUnitId)
+          .order('full_name', { ascending: true });
+
+        if (staffData && staffData.length > 0) {
+          loadedStaff = staffData;
+        }
+      }
+
+      // Pastikan user sendiri SELALU ada di daftar pilihan PIC
+      const userAlreadyInList = loadedStaff.some((s) => s.id === user.id);
+      if (!userAlreadyInList) {
+        loadedStaff.unshift({
+          id: user.id,
+          full_name: profile?.full_name || user.email || 'Pegawai (Saya)',
+          nip: profile?.nip || '-',
+          role: profile?.role || 'STAF',
+          unit_id: targetUnitId,
+        });
+      }
+
+      setStaffList(loadedStaff);
       setSelectedPics([user.id]);
 
-      // Ambil master tusi
+      // 3. Ambil master tusi
       const { data: tpl } = await supabase
         .from('task_templates')
         .select('*')
         .order('title', { ascending: true });
 
       if (tpl) setTemplates(tpl);
+    } catch (err: any) {
+      console.error('Error initializing form:', err);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   // Muat daftar seluruh pegawai untuk penugasan massal
   const loadBroadcastStaff = async (scope: 'SEKSI' | 'KANTOR' | 'WILAYAH') => {
     setLoadingBroadcastStaff(true);
-    let targetUnitIds: string[] = [];
+    try {
+      let targetUnitIds: string[] = [];
 
-    if (scope === 'SEKSI') {
-      if (unitId) targetUnitIds = [unitId];
-    } else if (scope === 'KANTOR') {
-      const currentLevel = userUnitInfo?.level;
-      const parentId = userUnitInfo?.parent_id;
-      const officeId = currentLevel === 'SEKSI' && parentId ? parentId : unitId;
+      if (scope === 'SEKSI') {
+        if (unitId) targetUnitIds = [unitId];
+      } else if (scope === 'KANTOR') {
+        const currentLevel = userUnitInfo?.level;
+        const parentId = userUnitInfo?.parent_id;
+        const officeId = currentLevel === 'SEKSI' && parentId ? parentId : unitId;
 
-      const { data: childUnits } = await supabase
-        .from('units')
-        .select('id')
-        .eq('parent_id', officeId);
+        const { data: childUnits } = await supabase
+          .from('units')
+          .select('id')
+          .eq('parent_id', officeId);
 
-      targetUnitIds = [officeId, ...(childUnits || []).map((u) => u.id)];
-    }
+        targetUnitIds = officeId ? [officeId, ...(childUnits || []).map((u) => u.id)] : [];
+      }
 
-    let query = supabase
-      .from('profiles')
-      .select('id, full_name, nip, role, unit:units(id, name, level)')
-      .order('full_name', { ascending: true });
+      let query = supabase
+        .from('profiles')
+        .select('id, full_name, nip, role, unit:units(id, name, level)')
+        .order('full_name', { ascending: true });
 
-    if (scope !== 'WILAYAH' && targetUnitIds.length > 0) {
-      query = query.in('unit_id', targetUnitIds);
-    }
+      if (scope !== 'WILAYAH' && targetUnitIds.length > 0) {
+        query = query.in('unit_id', targetUnitIds);
+      }
 
-    const { data: staffData } = await query;
-    if (staffData && staffData.length > 0) {
-      setBroadcastStaffList(staffData as any[]);
-    } else if (staffList.length > 0) {
+      const { data: staffData } = await query;
+      if (staffData && staffData.length > 0) {
+        setBroadcastStaffList(staffData as any[]);
+      } else {
+        setBroadcastStaffList(staffList);
+      }
+    } catch (err) {
+      console.error('Error loading broadcast staff:', err);
       setBroadcastStaffList(staffList);
+    } finally {
+      setLoadingBroadcastStaff(false);
     }
-    setLoadingBroadcastStaff(false);
   };
 
   const handleSelectTemplate = (templateId: string) => {
@@ -341,10 +365,25 @@ export default function NewTaskPage() {
     e.preventDefault();
     setErrorMessage('');
 
-    if (!unitId || !userId) {
-      setErrorMessage('Sesi kerja tidak valid. Harap muat ulang halaman.');
+    const activeUserId = userId;
+    let activeUnitId = unitId;
+
+    if (!activeUserId) {
+      setErrorMessage('Sesi autentikasi telah berakhir. Harap login kembali.');
       return;
     }
+
+    // Jika unitId belum terdeteksi di state, cari unit fallback
+    if (!activeUnitId) {
+      const { data: fallbackUnit } = await supabase.from('units').select('id').limit(1).single();
+      if (fallbackUnit) {
+        activeUnitId = fallbackUnit.id;
+      } else {
+        setErrorMessage('Unit kerja belum terdaftar pada sistem.');
+        return;
+      }
+    }
+
     if (!title.trim()) {
       setErrorMessage('Judul tugas wajib diisi.');
       return;
@@ -354,6 +393,7 @@ export default function NewTaskPage() {
       return;
     }
 
+    // Tentukan PIC Final
     let finalPics: string[] = [];
     if (assignmentMode === 'BROADCAST') {
       finalPics = broadcastStaffList
@@ -365,7 +405,7 @@ export default function NewTaskPage() {
         return;
       }
     } else {
-      finalPics = selectedPics.length > 0 ? selectedPics : [userId];
+      finalPics = selectedPics.length > 0 ? selectedPics : [activeUserId];
     }
 
     setSubmitting(true);
@@ -373,8 +413,9 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
+      // 1. Simpan ke Master Bank Tusi jika dicentang
       if (saveAsTemplate && !createdTemplateId) {
-        const { data: newTpl, error: tplError } = await supabase
+        const { data: newTpl } = await supabase
           .from('task_templates')
           .insert({
             tusi_type: userTusiType,
@@ -385,20 +426,21 @@ export default function NewTaskPage() {
             deadline_rule: periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
             exact_day: exactDay,
             is_recurring: periodType !== 'INSIDENTIL',
-            created_by_unit: unitId
+            created_by_unit: activeUnitId
           })
           .select('id')
           .single();
 
-        if (!tplError && newTpl) {
+        if (newTpl) {
           createdTemplateId = newTpl.id;
         }
       }
 
+      // 2. Simpan Tugas Riil Operasional
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
-          unit_id: unitId,
+          unit_id: activeUnitId,
           template_id: createdTemplateId,
           title: title.trim(),
           description: description.trim() || null,
@@ -410,7 +452,7 @@ export default function NewTaskPage() {
           priority,
           status: 'BELUM_DIKERJAKAN',
           progress_pct: 0,
-          created_by: userId,
+          created_by: activeUserId,
         })
         .select('id')
         .single();
@@ -421,6 +463,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
+      // 3. Simpan Seluruh PIC (Manual atau Broadcast)
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -438,6 +481,7 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
+      // 4. Simpan Subtasks Awal
       const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
@@ -452,7 +496,7 @@ export default function NewTaskPage() {
       router.push('/tasks');
       router.refresh();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Terjadi kesalahan sistem.');
+      setErrorMessage(err.message || 'Terjadi kesalahan saat menyimpan tugas.');
       setSubmitting(false);
     }
   };
@@ -497,7 +541,7 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Template Selector */}
+        {/* Master Bank Tusi Selector */}
         <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
             <Sparkles className="w-4 h-4 text-[#DF3B68]" />
@@ -774,7 +818,7 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* PIC PELAKSANA DENGAN SWITCHER KHUSUS ADMIN */}
+        {/* PIC PELAKSANA */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -814,7 +858,7 @@ export default function NewTaskPage() {
           {assignmentMode === 'MANUAL' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
-                <span>Pilih satu atau beberapa pegawai pelaksana di unit Anda:</span>
+                <span>Pilih satu atau beberapa pegawai pelaksana:</span>
                 <span className="font-semibold text-stone-700">{selectedPics.length} pegawai dipilih</span>
               </div>
 
