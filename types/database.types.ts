@@ -23,6 +23,7 @@ export interface Profile {
   nip: string;
   employment_status: EmploymentStatus;
   role: UserRole;
+  is_unit_admin?: boolean;
   unit_id: string;
   approval_status: ApprovalStatus;
   approved_by: string | null;
@@ -39,6 +40,24 @@ export interface Notification {
   action_link: string | null;
   is_read: boolean;
   created_at: string;
+}
+
+export interface HierarchyTemplateItem {
+  name: string;
+  code_suffix: string;
+  tusi_type: string;
+}
+
+export interface HierarchyTemplate {
+  id: string;
+  name: string;
+  target_level: UnitLevel;
+  tusi_type: string | null;
+  description: string | null;
+  structure: HierarchyTemplateItem[];
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TaskTemplate {
@@ -64,7 +83,7 @@ export interface Task {
   period_year: number;
   deadline: string;
   status: TaskStatus;
-  priority: TaskPriority;
+  priority: task_priority_type;
   progress_pct: number;
   evidence_link: string | null;
   kendala_note: string | null;
@@ -75,6 +94,8 @@ export interface Task {
   pics?: Profile[];
   subtasks?: Subtask[];
 }
+
+type task_priority_type = TaskPriority;
 
 export interface TaskPic {
   id: string;
