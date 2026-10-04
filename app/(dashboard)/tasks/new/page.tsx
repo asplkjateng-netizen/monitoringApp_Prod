@@ -14,14 +14,12 @@ import {
   AlertCircle, 
   BookmarkPlus, 
   Clock, 
-  Info,
   Calendar,
   Radio,
   Search,
   UserX,
   UserCheck,
-  Building,
-  ShieldCheck
+  Building
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -64,7 +62,7 @@ export default function NewTaskPage() {
   const [userTusiType, setUserTusiType] = useState<string>('UMUM');
   
   // Kewenangan Broadcast
-  const [canBroadcast, setCanBroadcast] = useState(false);
+  const [canBroadcast, setCanBroadcast] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Sumber data pendukung
@@ -115,7 +113,7 @@ export default function NewTaskPage() {
   }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay]);
 
   useEffect(() => {
-    if (assignmentMode === 'BROADCAST' && unitId) {
+    if (assignmentMode === 'BROADCAST') {
       loadBroadcastStaff(broadcastScope);
     }
   }, [assignmentMode, broadcastScope, unitId]);
@@ -202,14 +200,16 @@ export default function NewTaskPage() {
 
     setUserId(user.id);
 
+    // Ambil profil user
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, role, is_unit_admin, unit_id, unit:units(id, name, level, parent_id, tusi_type)')
+      .select('id, full_name, role, is_unit_admin, unit_id, unit:units(id, name, level, parent_id, tusi_type)')
       .eq('id', user.id)
       .single();
 
-    if (profile?.unit_id) {
-      setUnitId(profile.unit_id);
+    if (profile) {
+      const uId = profile.unit_id;
+      setUnitId(uId);
       setUserUnitInfo(profile.unit);
       const tusi = (profile.unit as any)?.tusi_type || 'UMUM';
       setUserTusiType(tusi);
@@ -219,31 +219,29 @@ export default function NewTaskPage() {
       const isLeader = ['KEPALA_UNIT', 'KEPALA_SEKSI'].includes(roleUpper) || profile.is_unit_admin === true || (profile.unit as any)?.level === 'ESELON_II';
 
       setIsSuperAdmin(adminFlag);
-      setCanBroadcast(adminFlag || isLeader);
+      setCanBroadcast(adminFlag || isLeader || true); // Izinkan broadcast untuk PIC
 
-      // Default scope
-      if (adminFlag || (profile.unit as any)?.level === 'ESELON_II') {
-        setBroadcastScope('WILAYAH');
-      } else if (roleUpper === 'KEPALA_UNIT' || (profile.unit as any)?.level === 'ESELON_III') {
-        setBroadcastScope('KANTOR');
-      } else {
-        setBroadcastScope('SEKSI');
-      }
-
-      // Ambil staf unit lokal
-      const { data: staff } = await supabase
+      // Ambil daftar pegawai di unit ini (termasuk fallback jika belum ada pegawai lain)
+      let { data: staff } = await supabase
         .from('profiles')
         .select('id, full_name, nip, role')
-        .eq('unit_id', profile.unit_id)
-        .eq('approval_status', 'APPROVED')
+        .eq('unit_id', uId)
         .order('full_name', { ascending: true });
 
-      if (staff) {
-        setStaffList(staff);
-        setSelectedPics([user.id]);
+      if (!staff || staff.length === 0) {
+        // Fallback: sertakan setidaknya profil user sendiri
+        staff = [{
+          id: profile.id,
+          full_name: profile.full_name || 'Pegawai',
+          nip: (profile as any).nip || '-',
+          role: profile.role || 'STAF',
+        }];
       }
 
-      // Ambil template
+      setStaffList(staff);
+      setSelectedPics([user.id]);
+
+      // Ambil master tusi
       const { data: tpl } = await supabase
         .from('task_templates')
         .select('*')
@@ -255,7 +253,7 @@ export default function NewTaskPage() {
     setLoading(false);
   };
 
-  // Muat daftar pegawai untuk Broadcast berdasarkan lingkup yang dipilih
+  // Muat daftar seluruh pegawai untuk penugasan massal
   const loadBroadcastStaff = async (scope: 'SEKSI' | 'KANTOR' | 'WILAYAH') => {
     setLoadingBroadcastStaff(true);
     let targetUnitIds: string[] = [];
@@ -278,7 +276,6 @@ export default function NewTaskPage() {
     let query = supabase
       .from('profiles')
       .select('id, full_name, nip, role, unit:units(id, name, level)')
-      .eq('approval_status', 'APPROVED')
       .order('full_name', { ascending: true });
 
     if (scope !== 'WILAYAH' && targetUnitIds.length > 0) {
@@ -286,8 +283,10 @@ export default function NewTaskPage() {
     }
 
     const { data: staffData } = await query;
-    if (staffData) {
+    if (staffData && staffData.length > 0) {
       setBroadcastStaffList(staffData as any[]);
+    } else if (staffList.length > 0) {
+      setBroadcastStaffList(staffList);
     }
     setLoadingBroadcastStaff(false);
   };
@@ -322,7 +321,6 @@ export default function NewTaskPage() {
     );
   };
 
-  // Toggle Pengecualian Pegawai
   const toggleExclusion = (staffId: string) => {
     setExcludedPicIds((prev) =>
       prev.includes(staffId) ? prev.filter((id) => id !== staffId) : [...prev, staffId]
@@ -356,7 +354,6 @@ export default function NewTaskPage() {
       return;
     }
 
-    // Tentukan PIC Final (Manual vs Broadcast dikurangi Pengecualian)
     let finalPics: string[] = [];
     if (assignmentMode === 'BROADCAST') {
       finalPics = broadcastStaffList
@@ -368,7 +365,7 @@ export default function NewTaskPage() {
         return;
       }
     } else {
-      finalPics = selectedPics;
+      finalPics = selectedPics.length > 0 ? selectedPics : [userId];
     }
 
     setSubmitting(true);
@@ -376,7 +373,6 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // 1. Simpan ke Katalog Tusi jika dicentang
       if (saveAsTemplate && !createdTemplateId) {
         const { data: newTpl, error: tplError } = await supabase
           .from('task_templates')
@@ -399,7 +395,6 @@ export default function NewTaskPage() {
         }
       }
 
-      // 2. Simpan Tugas Riil Operasional
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -426,7 +421,6 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan Seluruh PIC (Termasuk Penugasan Massal)
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -434,7 +428,6 @@ export default function NewTaskPage() {
         }));
         await supabase.from('task_pics').insert(picPayloads);
 
-        // Kirim notifikasi ke semua penerima
         const notifPayloads = finalPics.map((picUserId) => ({
           user_id: picUserId,
           title: assignmentMode === 'BROADCAST' ? '📢 Penugasan Massal Satker' : '📋 Penugasan Tugas Baru',
@@ -445,7 +438,6 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks Awal
       const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
@@ -475,8 +467,8 @@ export default function NewTaskPage() {
   ];
 
   const filteredBroadcastStaff = broadcastStaffList.filter((s) =>
-    s.full_name.toLowerCase().includes(exclusionSearch.toLowerCase()) ||
-    s.nip.includes(exclusionSearch) ||
+    s.full_name?.toLowerCase().includes(exclusionSearch.toLowerCase()) ||
+    s.nip?.includes(exclusionSearch) ||
     (s.unit?.name && s.unit.name.toLowerCase().includes(exclusionSearch.toLowerCase()))
   );
 
@@ -525,7 +517,7 @@ export default function NewTaskPage() {
           </select>
         </div>
 
-        {/* Informasi Pokok */}
+        {/* Rincian Informasi Tugas */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -782,9 +774,7 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* CARD PIC PELAKSANA: SWITCHER KHUSUS ADMIN (MANUAL vs BROADCAST MASSAL) */}
-        {/* ========================================================================= */}
+        {/* PIC PELAKSANA DENGAN SWITCHER KHUSUS ADMIN */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -792,37 +782,35 @@ export default function NewTaskPage() {
               <span>Tetapkan PIC Pelaksana</span>
             </div>
 
-            {/* SWITCHER KHUSUS ADMIN */}
-            {canBroadcast && (
-              <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
-                <button
-                  type="button"
-                  onClick={() => setAssignmentMode('MANUAL')}
-                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
-                    assignmentMode === 'MANUAL'
-                      ? 'bg-white text-stone-900 shadow-xs'
-                      : 'text-stone-500 hover:text-stone-900'
-                  }`}
-                >
-                  Penugasan Manual
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAssignmentMode('BROADCAST')}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                    assignmentMode === 'BROADCAST'
-                      ? 'bg-[#DF3B68] text-white shadow-xs'
-                      : 'text-stone-600 hover:text-[#DF3B68]'
-                  }`}
-                >
-                  <Radio className="w-3.5 h-3.5" />
-                  <span>Broadcast Massal</span>
-                </button>
-              </div>
-            )}
+            {/* SWITCHER KHUSUS ADMIN & PIC */}
+            <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
+              <button
+                type="button"
+                onClick={() => setAssignmentMode('MANUAL')}
+                className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                  assignmentMode === 'MANUAL'
+                    ? 'bg-white text-stone-900 shadow-xs'
+                    : 'text-stone-500 hover:text-stone-900'
+                }`}
+              >
+                Penugasan Manual
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignmentMode('BROADCAST')}
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  assignmentMode === 'BROADCAST'
+                    ? 'bg-[#DF3B68] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-[#DF3B68]'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Broadcast Massal</span>
+              </button>
+            </div>
           </div>
 
-          {/* OPSI 1: PENUGASAN MANUAL STANDAR */}
+          {/* OPSI 1: PENUGASAN MANUAL */}
           {assignmentMode === 'MANUAL' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
@@ -857,11 +845,9 @@ export default function NewTaskPage() {
             </div>
           )}
 
-          {/* OPSI 2: BROADCAST MASSAL DENGAN DAFTAR PENGECUALIAN (EXCEPTION LIST) */}
+          {/* OPSI 2: BROADCAST MASSAL */}
           {assignmentMode === 'BROADCAST' && (
             <div className="space-y-4 bg-stone-50/70 p-4 sm:p-5 rounded-2xl border border-stone-200">
-              
-              {/* Pemilih Lingkup Instansi Broadcast */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
@@ -898,19 +884,17 @@ export default function NewTaskPage() {
                     🏛️ Satu Kantor (Seluruh Seksi KPPN)
                   </button>
 
-                  {isSuperAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setBroadcastScope('WILAYAH')}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
-                        broadcastScope === 'WILAYAH'
-                          ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
-                          : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
-                      }`}
-                    >
-                      🌐 Seluruh Wilayah (Semua KPPN & Kanwil)
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('WILAYAH')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'WILAYAH'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🌐 Seluruh Wilayah (Semua KPPN & Kanwil)
+                  </button>
                 </div>
               </div>
 
@@ -919,7 +903,7 @@ export default function NewTaskPage() {
                 <div className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4 text-emerald-600" />
                   <span>
-                    Penerima Tugas Aktif: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
+                    Penerima Tugas: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -938,7 +922,6 @@ export default function NewTaskPage() {
                     <span>Daftar Pengecualian Pegawai (Centang untuk mengecualikan):</span>
                   </p>
                   
-                  {/* Pencarian nama di daftar pengecualian */}
                   <div className="relative w-full sm:w-64">
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
                     <input
