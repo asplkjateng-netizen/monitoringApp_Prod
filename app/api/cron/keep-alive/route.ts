@@ -8,7 +8,7 @@ function computeCycleDeadline(
   now: Date
 ): string {
   const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1;
+  const currentMonth = now.getMonth() + 1; // 1 - 12
   const rule = deadlineRule || 'END_OF_PERIOD';
   const day = exactDay || 31;
 
@@ -26,8 +26,10 @@ function computeCycleDeadline(
       targetMonth = currentMonth;
     }
   } else if (periodType === 'TRIWULANAN') {
-    const quarter = Math.ceil(currentMonth / 3);
-    const quarterEndMonth = quarter * 3;
+    const currentQuarter = Math.ceil(currentMonth / 3);
+    const quarterEndMonth = currentQuarter * 3; // 3, 6, 9, 12
+    const quarterStartMonth = (currentQuarter - 1) * 3 + 1; // 1, 4, 7, 10
+
     if (rule === 'END_OF_PERIOD') {
       targetMonth = quarterEndMonth;
     } else if (rule === 'NEXT_MONTH_DATE') {
@@ -36,19 +38,26 @@ function computeCycleDeadline(
         targetMonth = 1;
         targetYear += 1;
       }
+    } else if (rule === 'SAME_MONTH_DATE') {
+      targetMonth = quarterStartMonth;
     } else {
       targetMonth = currentMonth;
     }
   } else if (periodType === 'SEMESTERAN') {
-    const semesterEndMonth = currentMonth <= 6 ? 6 : 12;
+    const isSem1 = currentMonth <= 6;
+    const semEndMonth = isSem1 ? 6 : 12;
+    const semStartMonth = isSem1 ? 1 : 7;
+
     if (rule === 'END_OF_PERIOD') {
-      targetMonth = semesterEndMonth;
+      targetMonth = semEndMonth;
     } else if (rule === 'NEXT_MONTH_DATE') {
-      targetMonth = semesterEndMonth + 1;
+      targetMonth = semEndMonth + 1;
       if (targetMonth > 12) {
         targetMonth = 1;
         targetYear += 1;
       }
+    } else if (rule === 'SAME_MONTH_DATE') {
+      targetMonth = semStartMonth;
     } else {
       targetMonth = currentMonth;
     }
@@ -58,11 +67,14 @@ function computeCycleDeadline(
     } else if (rule === 'NEXT_MONTH_DATE') {
       targetMonth = 1;
       targetYear += 1;
+    } else if (rule === 'SAME_MONTH_DATE') {
+      targetMonth = 1;
     }
   }
 
+  // Hitung jumlah hari maksimal dalam bulan target
   const daysInTargetMonth = new Date(targetYear, targetMonth, 0).getDate();
-  const finalDay = rule === 'END_OF_PERIOD' || day >= 31 ? daysInTargetMonth : Math.min(day, daysInTargetMonth);
+  const finalDay = day >= 31 ? daysInTargetMonth : Math.min(day, daysInTargetMonth);
 
   return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
 }
@@ -176,7 +188,7 @@ export async function GET(request: Request) {
     }
   }
 
-  // 4. [BARU - ARCHIVING ENGINE] Memindahkan Tugas Selesai > 30 Hari ke task_archives
+  // 4. Archiving Engine
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -228,7 +240,6 @@ export async function GET(request: Request) {
         const { error: archiveError } = await supabase.from('task_archives').upsert(archiveRecord);
 
         if (!archiveError) {
-          // Hapus dari tabel tasks operasional (cascade delete menghapus task_pics dan subtasks)
           await supabase.from('tasks').delete().eq('id', t.id);
           archivedTasksCount++;
         }
@@ -238,7 +249,7 @@ export async function GET(request: Request) {
     console.error('Error saat pengarsipan tugas:', archiveErr);
   }
 
-  // 5. [BARU - NOTIFICATION PURGE] Menghapus Notifikasi Usang
+  // 5. Notification Purge
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
@@ -262,7 +273,7 @@ export async function GET(request: Request) {
     console.error('Error membersihkan notifikasi usang:', purgeErr);
   }
 
-  // 6. [BACKLOG-1] Pengecekan Deadline H-1
+  // 6. Pengecekan Deadline H-1
   let deadlineAlertsSent = 0;
   try {
     const tomorrow = new Date();
