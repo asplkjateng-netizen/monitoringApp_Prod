@@ -1,3 +1,4 @@
+// app/(dashboard)/tasks/page.tsx
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
@@ -16,7 +17,9 @@ import {
   ChevronUp,
   CheckSquare,
   Square,
-  Layers
+  Layers,
+  BookOpen,
+  Link as LinkIcon
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -25,6 +28,7 @@ interface SubtaskItem {
   task_id: string;
   title: string;
   is_completed: boolean;
+  deadline?: string | null;
   custom_evidence_link?: string;
 }
 
@@ -34,6 +38,7 @@ interface TaskItem {
   title: string;
   description?: string;
   legal_basis?: string;
+  legal_basis_link?: string;
   deadline: string;
   status: 'BELUM_DIKERJAKAN' | 'ON_PROGRESS' | 'TERKENDALA' | 'SELESAI';
   priority: 'TINGGI' | 'SEDANG' | 'RENDAH';
@@ -69,8 +74,9 @@ function TasksContent() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
 
-  // Expandable subtasks state
+  // Accordion Expand States
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
+  const [expandedDescIds, setExpandedDescIds] = useState<string[]>([]);
 
   // Role & Multi-Unit State
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -140,8 +146,14 @@ function TasksContent() {
     setLoading(false);
   };
 
-  const toggleExpand = (taskId: string) => {
+  const toggleSubtasks = (taskId: string) => {
     setExpandedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
+    );
+  };
+
+  const toggleDescription = (taskId: string) => {
+    setExpandedDescIds((prev) =>
       prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]
     );
   };
@@ -285,11 +297,11 @@ function TasksContent() {
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header & Tombol Tambah */}
+      {/* Header & Aksi Rekam */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Daftar Pekerjaan</h1>
-          <p className="text-sm text-stone-500 mt-1">Pemantauan progres dan penyelesaian tugas periode aktif unit kerja.</p>
+          <p className="text-sm text-stone-500 mt-1">Pemantauan progres, dasar hukum, link bukti, dan tahapan sub-pekerjaan.</p>
         </div>
         <Link
           href="/tasks/new"
@@ -357,7 +369,7 @@ function TasksContent() {
         </div>
       </div>
 
-      {/* DAFTAR KARTU TUGAS */}
+      {/* DAFTAR PEKERJAAN */}
       <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden">
         {loading ? (
           <div className="py-20 text-center text-sm text-stone-400">Memuat daftar tugas...</div>
@@ -365,17 +377,18 @@ function TasksContent() {
           <div className="py-20 text-center">
             <p className="text-stone-500 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
             <p className="text-stone-400 text-xs mt-1">
-              {selectedUnitFilter === 'MY_UNIT' && isSuperAdmin 
-                ? 'Tip: Pilih opsi "🌐 Seluruh Unit (Regional)" pada dropdown di atas untuk melihat tugas milik KPPN/unit lain.'
-                : 'Coba pilih siklus periode lain di pojok kanan atas atau ubah tab status tugas.'}
+              Coba pilih siklus periode lain di pojok kanan atas atau ubah tab status tugas.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-stone-100">
             {filteredTasks.map((task) => {
-              const isExpanded = expandedTaskIds.includes(task.id);
+              const isSubExpanded = expandedTaskIds.includes(task.id);
+              const isDescExpanded = expandedDescIds.includes(task.id);
               const progressPct = getEffectiveProgress(task);
               const subtasksCount = task.subtasks?.length || 0;
+              const hasLegalLink = !!task.legal_basis_link;
+              const hasEvidence = !!task.evidence_link;
 
               return (
                 <div key={task.id} className="transition-colors hover:bg-stone-50/40">
@@ -409,7 +422,7 @@ function TasksContent() {
                         </p>
                       )}
 
-                      {/* Progress Bar (Otomatis 100% jika Selesai) */}
+                      {/* Progress Bar (100% Otomatis jika selesai) */}
                       <div className="flex items-center gap-3 pt-1 max-w-xs">
                         <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
                           <div 
@@ -421,24 +434,55 @@ function TasksContent() {
                       </div>
                     </div>
 
+                    {/* Tombol Aksi Kontrol & Link Langsung */}
                     <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
-                      {/* Tombol Buka/Tutup Sub-pekerjaan & Detail Langsung di Sini */}
+                      {/* Toggle Hide/Show Deskripsi & Dasar Hukum */}
+                      {(task.description || task.legal_basis || hasLegalLink) && (
+                        <button
+                          type="button"
+                          onClick={() => toggleDescription(task.id)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
+                            isDescExpanded
+                              ? 'bg-amber-50 text-amber-900 border-amber-300'
+                              : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                          }`}
+                        >
+                          <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Dasar Hukum & Petunjuk</span>
+                          {isDescExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+
+                      {/* Toggle Sub-pekerjaan */}
                       <button
                         type="button"
-                        onClick={() => toggleExpand(task.id)}
+                        onClick={() => toggleSubtasks(task.id)}
                         className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
-                          isExpanded 
+                          isSubExpanded 
                             ? 'bg-stone-900 text-white border-stone-900' 
                             : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
                         }`}
                       >
                         <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
                         <span>Sub-tugas ({subtasksCount})</span>
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </button>
 
-                      {/* Akses Cepat Link Bukti */}
-                      {task.evidence_link && (
+                      {/* Akses Cepat Link Dasar Hukum jika ada */}
+                      {hasLegalLink && (
+                        <a
+                          href={task.legal_basis_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors"
+                          title="Buka Tautan Regulasi / Dasar Hukum"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5" /> Regulasi
+                        </a>
+                      )}
+
+                      {/* Akses Cepat Link Bukti Pekerjaan */}
+                      {hasEvidence && (
                         <a
                           href={task.evidence_link}
                           target="_blank"
@@ -450,42 +494,66 @@ function TasksContent() {
                         </a>
                       )}
 
-                      {/* Link Lengkap ke Halaman Detail & Edit / Hapus */}
+                      {/* Detail & Kelola Penuh */}
                       <Link
                         href={`/tasks/${task.id}`}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
                       >
-                        Detail & Sub-tugas
-                        <ExternalLink className="w-3.5 h-3.5" />
+                        Kelola
+                        <ExternalLink className="w-3 h-3" />
                       </Link>
                     </div>
                   </div>
 
                   {/* ========================================================= */}
-                  {/* EXPANDED ACCORDION: RINCIAN & CHECKLIST SUB-PEKERJAAN     */}
+                  {/* EXPAND 1: HIDE & SHOW DESKRIPSI & DASAR HUKUM             */}
                   {/* ========================================================= */}
-                  {isExpanded && (
-                    <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
-                      {/* Deskripsi & Dasar Hukum */}
-                      {(task.description || task.legal_basis) && (
-                        <div className="p-3 bg-white rounded-2xl border border-stone-200/80 space-y-1 text-xs">
-                          {task.legal_basis && (
-                            <p className="text-stone-500 font-mono text-[11px]">
-                              <strong>Dasar Hukum:</strong> {task.legal_basis}
-                            </p>
-                          )}
-                          {task.description && (
-                            <p className="text-stone-700 leading-relaxed">{task.description}</p>
+                  {isDescExpanded && (
+                    <div className="px-5 pb-4 pt-1 bg-amber-50/40 border-t border-amber-100 space-y-2 animate-in fade-in duration-150">
+                      {task.legal_basis && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-stone-700">
+                          <span className="font-bold text-amber-900">Dasar Hukum:</span>
+                          <span className="font-mono bg-white px-2 py-0.5 rounded border border-stone-200">{task.legal_basis}</span>
+                          {task.legal_basis_link && (
+                            <a
+                              href={task.legal_basis_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" /> Buka Tautan Dokumen Regulasi
+                            </a>
                           )}
                         </div>
                       )}
 
-                      {/* Checklist Sub-pekerjaan */}
+                      {task.description && (
+                        <div className="p-3 bg-white rounded-xl border border-stone-200/70 text-xs text-stone-600 leading-relaxed">
+                          <p className="font-bold text-stone-800 mb-1">Petunjuk Teknis & Deskripsi:</p>
+                          {task.description}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ========================================================= */}
+                  {/* EXPAND 2: CHECKLIST SUB-PEKERJAAN BESERTA DEADLINE        */}
+                  {/* ========================================================= */}
+                  {isSubExpanded && (
+                    <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
                       <div className="space-y-1.5">
-                        <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
-                          <span>Tahapan Sub-Pekerjaan:</span>
-                        </p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
+                            <span>Tahapan Sub-Pekerjaan & Batas Waktu:</span>
+                          </p>
+                          <Link
+                            href={`/tasks/${task.id}`}
+                            className="text-[11px] text-[#DF3B68] hover:underline font-semibold"
+                          >
+                            + Tambah / Edit Sub-tugas
+                          </Link>
+                        </div>
 
                         {!task.subtasks || task.subtasks.length === 0 ? (
                           <div className="p-3 bg-white rounded-xl border border-stone-200 text-xs text-stone-400 italic">
@@ -496,20 +564,28 @@ function TasksContent() {
                             {task.subtasks.map((st, idx) => (
                               <div
                                 key={st.id || idx}
-                                className={`p-2.5 rounded-xl border text-xs flex items-center gap-2.5 transition-colors ${
+                                className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-colors ${
                                   st.is_completed
                                     ? 'bg-emerald-50/60 border-emerald-200 text-emerald-800'
                                     : 'bg-white border-stone-200 text-stone-700'
                                 }`}
                               >
-                                {st.is_completed ? (
-                                  <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
-                                ) : (
-                                  <Square className="w-4 h-4 text-stone-400 shrink-0" />
+                                <div className="flex items-center gap-2 truncate">
+                                  {st.is_completed ? (
+                                    <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-stone-400 shrink-0" />
+                                  )}
+                                  <span className={`truncate ${st.is_completed ? 'line-through text-stone-400 font-medium' : 'font-medium'}`}>
+                                    {idx + 1}. {st.title}
+                                  </span>
+                                </div>
+
+                                {st.deadline && (
+                                  <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200" title="Batas waktu tahapan ini">
+                                    Batas: {st.deadline}
+                                  </span>
                                 )}
-                                <span className={`truncate flex-1 ${st.is_completed ? 'line-through text-stone-400 font-medium' : 'font-medium'}`}>
-                                  {idx + 1}. {st.title}
-                                </span>
                               </div>
                             ))}
                           </div>
@@ -517,6 +593,7 @@ function TasksContent() {
                       </div>
                     </div>
                   )}
+
                 </div>
               );
             })}
