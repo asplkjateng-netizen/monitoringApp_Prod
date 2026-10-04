@@ -1,3 +1,4 @@
+// app/(dashboard)/admin/users/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -79,91 +80,95 @@ export default function UsersAdminPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setErrorMsg('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data: currentProfile } = await supabase
-      .from('profiles')
-      .select('*, unit:units(*)')
-      .eq('id', user.id)
-      .single();
+      const { data: currentProfile, error: profileErr } = await supabase
+        .from('profiles')
+        .select('*, unit:units(*)')
+        .eq('id', user.id)
+        .maybeSingle();
 
-    if (!currentProfile) {
-      setLoading(false);
-      return;
-    }
+      if (profileErr || !currentProfile) {
+        console.error('Error loading current profile:', profileErr);
+        setLoading(false);
+        return;
+      }
 
-    setCurrentUser(currentProfile as any);
-    const isSuperAdmin = currentProfile.role === 'SUPER_ADMIN';
+      setCurrentUser(currentProfile as any);
+      const isSuperAdmin = String(currentProfile.role).toUpperCase() === 'SUPER_ADMIN';
 
-    // 1. Ambil daftar unit untuk opsi mutasi
-    if (isSuperAdmin) {
-      const { data: unitData } = await supabase
-        .from('units')
-        .select('id, name, code, level')
-        .order('level', { ascending: true })
-        .order('name', { ascending: true });
-      if (unitData) setUnits(unitData);
-    } else {
-      const { data: unitData } = await supabase
-        .from('units')
-        .select('id, name, code, level')
-        .or(`id.eq.${currentProfile.unit_id},parent_id.eq.${currentProfile.unit_id}`)
-        .order('name', { ascending: true });
-      if (unitData) setUnits(unitData || []);
-    }
+      // 1. Ambil daftar unit untuk mutasi
+      if (isSuperAdmin) {
+        const { data: unitData } = await supabase
+          .from('units')
+          .select('id, name, code, level')
+          .order('level', { ascending: true })
+          .order('name', { ascending: true });
+        if (unitData) setUnits(unitData);
+      } else {
+        const { data: unitData } = await supabase
+          .from('units')
+          .select('id, name, code, level')
+          .or(`id.eq.${currentProfile.unit_id},parent_id.eq.${currentProfile.unit_id}`)
+          .order('name', { ascending: true });
+        if (unitData) setUnits(unitData || []);
+      }
 
-    // 2. Ambil daftar profil pegawai berlingkup (Scoped)
-    let profileQuery = supabase
-      .from('profiles')
-      .select(`
-        id,
-        full_name,
-        nip,
-        employment_status,
-        role,
-        is_unit_admin,
-        unit_id,
-        approval_status,
-        created_at,
-        unit:units (
+      // 2. Query master profiles (syntax unit:units(...) tanpa spasi)
+      let profileQuery = supabase
+        .from('profiles')
+        .select(`
           id,
-          name,
-          code,
-          level
-        )
-      `)
-      .order('full_name', { ascending: true });
+          full_name,
+          nip,
+          employment_status,
+          role,
+          is_unit_admin,
+          unit_id,
+          approval_status,
+          created_at,
+          unit:units(id, name, code, level)
+        `)
+        .order('full_name', { ascending: true });
 
-    if (!isSuperAdmin) {
-      // Admin Unit hanya melihat user di unitnya/anak unitnya, dan BUKAN super admin
-      const { data: childUnits } = await supabase
-        .from('units')
-        .select('id')
-        .or(`id.eq.${currentProfile.unit_id},parent_id.eq.${currentProfile.unit_id}`);
-      const allowedUnitIds = (childUnits || []).map((u) => u.id);
+      if (!isSuperAdmin) {
+        const { data: childUnits } = await supabase
+          .from('units')
+          .select('id')
+          .or(`id.eq.${currentProfile.unit_id},parent_id.eq.${currentProfile.unit_id}`);
+        const allowedUnitIds = (childUnits || []).map((u) => u.id);
 
-      profileQuery = profileQuery
-        .in('unit_id', allowedUnitIds)
-        .neq('role', 'SUPER_ADMIN');
+        profileQuery = profileQuery
+          .in('unit_id', allowedUnitIds)
+          .neq('role', 'SUPER_ADMIN');
+      }
+
+      const { data: profileData, error: listErr } = await profileQuery;
+      if (listErr) {
+        console.error('Error fetching profiles list:', listErr);
+        setErrorMsg('Gagal memuat daftar pegawai: ' + listErr.message);
+      } else if (profileData) {
+        setProfiles(profileData as any);
+      }
+    } catch (err: any) {
+      console.error('General error loading users:', err);
+      setErrorMsg(err.message || 'Terjadi kesalahan sistem saat memuat data');
+    } finally {
+      setLoading(false);
     }
-
-    const { data: profileData, error } = await profileQuery;
-    if (!error && profileData) {
-      setProfiles(profileData as any);
-    }
-
-    setLoading(false);
   };
 
   const openEditModal = (user: ProfileItem) => {
     setSelectedUser(user);
-    setFullName(user.full_name);
-    setEmploymentStatus(user.employment_status);
-    setRole(user.role);
+    setFullName(user.full_name || '');
+    setEmploymentStatus(user.employment_status || 'PNS');
+    setRole(user.role || 'STAF');
     setIsUnitAdmin(user.is_unit_admin || false);
-    setUnitId(user.unit_id);
-    setApprovalStatus(user.approval_status);
+    setUnitId(user.unit_id || '');
+    setApprovalStatus(user.approval_status || 'APPROVED');
     setErrorMsg('');
     setIsModalOpen(true);
   };
@@ -184,10 +189,8 @@ export default function UsersAdminPage() {
     }
 
     setIsSubmitting(true);
-
     const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
-    // Payload update dengan proteksi RBAC
     const payload: any = {
       full_name: fullName.trim(),
       employment_status: employmentStatus,
@@ -196,12 +199,10 @@ export default function UsersAdminPage() {
       updated_at: new Date().toISOString(),
     };
 
-    // Hanya Super Admin yang boleh mengubah role menjadi SUPER_ADMIN atau mengatur is_unit_admin
     if (isSuperAdmin) {
       payload.role = role;
       payload.is_unit_admin = isUnitAdmin;
     } else {
-      // Admin Unit hanya boleh menetapkan role STAF atau KEPALA_SEKSI
       payload.role = role === 'SUPER_ADMIN' ? 'STAF' : role;
     }
 
@@ -285,16 +286,17 @@ export default function UsersAdminPage() {
   };
 
   const filteredProfiles = profiles.filter((p) => {
-    const matchesSearch = 
-      p.full_name.toLowerCase().includes(search.toLowerCase()) || 
-      p.nip.toLowerCase().includes(search.toLowerCase());
+    const fullNameLower = (p.full_name || '').toLowerCase();
+    const nipStr = p.nip || '';
+    const searchLower = search.toLowerCase();
+
+    const matchesSearch = fullNameLower.includes(searchLower) || nipStr.includes(searchLower);
     const matchesRole = roleFilter === 'ALL' || p.role === roleFilter;
     return matchesSearch && matchesRole;
   });
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Manajemen Pegawai & Mutasi</h1>
         <p className="text-xs text-stone-500 mt-1">
@@ -304,6 +306,13 @@ export default function UsersAdminPage() {
         </p>
       </div>
 
+      {errorMsg && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
       {successMsg && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
@@ -311,7 +320,7 @@ export default function UsersAdminPage() {
         </div>
       )}
 
-      {/* Filter & Live Search Toolbar */}
+      {/* Toolbar Filter & Pencarian */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200/70 shadow-sm">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -347,7 +356,7 @@ export default function UsersAdminPage() {
         </div>
       </div>
 
-      {/* Daftar Pegawai */}
+      {/* Tabel Pegawai */}
       <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden">
         {loading ? (
           <div className="py-20 text-center text-xs text-stone-400">Memuat data pegawai...</div>
@@ -412,10 +421,10 @@ export default function UsersAdminPage() {
         )}
       </div>
 
-      {/* Modal Mutasi & Kelola Pegawai */}
+      {/* Modal Mutasi */}
       {isModalOpen && selectedUser && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
                 <ArrowRightLeft className="w-5 h-5 text-primary" />
@@ -425,18 +434,11 @@ export default function UsersAdminPage() {
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full text-stone-400 hover:bg-stone-100 transition-colors"
+                className="p-1 rounded-full text-stone-400 hover:bg-stone-100"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            {errorMsg && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
 
             <form onSubmit={handleUpdate} className="space-y-4">
               <Input
@@ -456,7 +458,6 @@ export default function UsersAdminPage() {
                 />
               </div>
 
-              {/* Status Kepegawaian & Role */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1 text-left">
                   <label className="block text-xs font-semibold text-stone-600">Status Kepegawaian</label>
@@ -491,7 +492,6 @@ export default function UsersAdminPage() {
                 </div>
               </div>
 
-              {/* Opsi Khusus Super Admin: Tandai sebagai Admin Unit */}
               {currentUser?.role === 'SUPER_ADMIN' ? (
                 <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200/80 flex items-center justify-between">
                   <div>
@@ -515,7 +515,6 @@ export default function UsersAdminPage() {
                 )
               )}
 
-              {/* Unit Penempatan (Mutasi) */}
               <div className="space-y-1 text-left">
                 <label className="block text-xs font-semibold text-stone-600">Unit / Seksi Penempatan (Mutasi) *</label>
                 <select
@@ -533,7 +532,6 @@ export default function UsersAdminPage() {
                 </select>
               </div>
 
-              {/* Status Akun */}
               <div className="space-y-1 text-left">
                 <label className="block text-xs font-semibold text-stone-600">Status Akses Akun</label>
                 <select
@@ -548,18 +546,10 @@ export default function UsersAdminPage() {
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-stone-100">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsModalOpen(false)}
-                >
+                <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Batal
                 </Button>
-                <Button
-                  type="submit"
-                  isLoading={isSubmitting}
-                  className="bg-primary hover:bg-primary-hover text-white font-semibold"
-                >
+                <Button type="submit" isLoading={isSubmitting} className="bg-primary hover:bg-primary-hover text-white font-semibold">
                   Simpan Perubahan
                 </Button>
               </div>
