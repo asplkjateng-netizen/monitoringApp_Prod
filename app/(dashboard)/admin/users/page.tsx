@@ -1,4 +1,3 @@
-// app/(dashboard)/admin/users/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -8,13 +7,13 @@ import {
   Building2, 
   X, 
   CheckCircle2, 
-  AlertCircle,
-  ArrowRightLeft,
-  UserCheck,
-  UserX,
-  Shield,
-  Trash2,
-  Lock
+  AlertCircle, 
+  ArrowRightLeft, 
+  UserCheck, 
+  UserX, 
+  Shield, 
+  Trash2, 
+  Lock 
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -30,7 +29,7 @@ interface ProfileItem {
   nip: string;
   employment_status: EmploymentStatus;
   role: UserRole;
-  is_unit_admin: boolean;
+  is_unit_admin?: boolean;
   unit_id: string;
   approval_status: ApprovalStatus;
   created_at: string;
@@ -100,7 +99,7 @@ export default function UsersAdminPage() {
       setCurrentUser(currentProfile as any);
       const isSuperAdmin = String(currentProfile.role).toUpperCase() === 'SUPER_ADMIN';
 
-      // 1. Ambil daftar unit untuk mutasi
+      // 1. Ambil daftar unit untuk opsi mutasi
       if (isSuperAdmin) {
         const { data: unitData } = await supabase
           .from('units')
@@ -117,21 +116,10 @@ export default function UsersAdminPage() {
         if (unitData) setUnits(unitData || []);
       }
 
-      // 2. Query master profiles (syntax unit:units(...) tanpa spasi)
+      // 2. Query master profiles secara aman
       let profileQuery = supabase
         .from('profiles')
-        .select(`
-          id,
-          full_name,
-          nip,
-          employment_status,
-          role,
-          is_unit_admin,
-          unit_id,
-          approval_status,
-          created_at,
-          unit:units(id, name, code, level)
-        `)
+        .select('*, unit:units(id, name, code, level)')
         .order('full_name', { ascending: true });
 
       if (!isSuperAdmin) {
@@ -148,7 +136,7 @@ export default function UsersAdminPage() {
 
       const { data: profileData, error: listErr } = await profileQuery;
       if (listErr) {
-        console.error('Error fetching profiles list:', listErr);
+        console.error('Error fetching profiles:', listErr);
         setErrorMsg('Gagal memuat daftar pegawai: ' + listErr.message);
       } else if (profileData) {
         setProfiles(profileData as any);
@@ -250,7 +238,7 @@ export default function UsersAdminPage() {
     return `${nip.slice(0, 8)} ${nip.slice(8, 14)} ${nip.slice(14, 15)} ${nip.slice(15, 18)}`;
   };
 
-  const getRoleBadge = (r: UserRole, isAdmin: boolean) => {
+  const getRoleBadge = (r: UserRole, isAdmin?: boolean) => {
     if (r === 'SUPER_ADMIN') {
       return <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">SUPER ADMIN</span>;
     }
