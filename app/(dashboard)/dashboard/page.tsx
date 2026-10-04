@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Building2,
   TrendingUp,
-  Eye,
   SlidersHorizontal
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -91,11 +90,10 @@ export default function DashboardPage() {
     const isAdmin = role === 'SUPER_ADMIN';
 
     setCurrentUserRole(role);
-    setIsSuperAdmin(isAdmin); // <-- PERBAIKAN: set state boolean admin dengan benar
+    setIsSuperAdmin(isAdmin);
     setUserUnit(profile.unit);
     setSimulatedUnitId(profile.unit_id);
 
-    // Tentukan default perspective awal
     let initialPerspective: DashboardPerspective = 'STAF';
     if (isAdmin || (profile.unit as any)?.level === 'ESELON_II') {
       initialPerspective = 'KEPALA_KANWIL';
@@ -107,7 +105,6 @@ export default function DashboardPage() {
 
     setActivePerspective(initialPerspective);
 
-    // Ambil daftar seluruh unit jika role adalah SUPER_ADMIN
     if (isAdmin) {
       const { data: allUnits } = await supabase
         .from('units')
@@ -130,39 +127,51 @@ export default function DashboardPage() {
 
     const threeDaysLater = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // ==========================================
-    // 1. PERSPEKTIF STAF (HANYA TUGAS PRIBADI)
-    // ==========================================
+    // =========================================================================
+    // 1. PERSPEKTIF STAF: GABUNGAN TUGAS UNIT SEKSI + TUGAS SEBAGAI PIC
+    // =========================================================================
     if (perspective === 'STAF') {
+      // a. Ambil ID tugas di mana user merupakan PIC
       const { data: picRecords } = await supabase
         .from('task_pics')
         .select('task_id')
         .eq('user_id', userId);
 
-      const myTaskIds = (picRecords || []).map((p) => p.task_id);
+      const picTaskIds = (picRecords || []).map((p) => p.task_id);
 
-      if (myTaskIds.length === 0) {
-        setMetrics({ total: 0, completed: 0, inProgress: 0, critical: 0 });
-        setUrgentTasks([]);
-        setLoading(false);
-        return;
-      }
-
-      const { data: myTasks } = await supabase
+      // b. Ambil seluruh tugas di seksi kerja staf (targetUnitId)
+      const { data: unitTasks } = await supabase
         .from('tasks')
         .select('*')
-        .in('id', myTaskIds)
-        .order('deadline', { ascending: true });
+        .eq('unit_id', targetUnitId);
 
-      const tasks = myTasks || [];
-      const completed = tasks.filter((t) => t.status === 'SELESAI').length;
-      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
-      const critical = tasks.filter(
+      // c. Jika ada tugas di luar seksi namun user adalah PIC, ambil juga
+      let externalTasks: any[] = [];
+      if (picTaskIds.length > 0) {
+        const { data: extraTasks } = await supabase
+          .from('tasks')
+          .select('*')
+          .in('id', picTaskIds);
+        externalTasks = extraTasks || [];
+      }
+
+      // d. Gabungkan dan hapus duplikasi berdasarkan ID tugas
+      const taskMap = new Map<string, any>();
+      (unitTasks || []).forEach((t) => taskMap.set(t.id, t));
+      externalTasks.forEach((t) => taskMap.set(t.id, t));
+
+      const combinedTasks = Array.from(taskMap.values()).sort(
+        (a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime()
+      );
+
+      const completed = combinedTasks.filter((t) => t.status === 'SELESAI').length;
+      const inProgress = combinedTasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const critical = combinedTasks.filter(
         (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
       );
 
       setMetrics({
-        total: tasks.length,
+        total: combinedTasks.length,
         completed,
         inProgress,
         critical: critical.length,
@@ -170,9 +179,9 @@ export default function DashboardPage() {
       setUrgentTasks(critical.slice(0, 5) as Task[]);
     }
 
-    // ==========================================
+    // =========================================================================
     // 2. PERSPEKTIF KEPALA SEKSI (1 SEKSI)
-    // ==========================================
+    // =========================================================================
     else if (perspective === 'KEPALA_SEKSI') {
       const { data: tasks } = await supabase
         .from('tasks')
@@ -218,9 +227,9 @@ export default function DashboardPage() {
       }
     }
 
-    // ==========================================
+    // =========================================================================
     // 3. PERSPEKTIF KEPALA KANTOR / KAKPPN
-    // ==========================================
+    // =========================================================================
     else if (perspective === 'KEPALA_UNIT') {
       const { data: childUnits } = await supabase
         .from('units')
@@ -273,9 +282,9 @@ export default function DashboardPage() {
       }
     }
 
-    // ==========================================
+    // =========================================================================
     // 4. PERSPEKTIF KEPALA KANWIL
-    // ==========================================
+    // =========================================================================
     else if (perspective === 'KEPALA_KANWIL') {
       const { data: allTasks } = await supabase
         .from('tasks')
@@ -342,10 +351,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      
-      {/* ========================================================================= */}
-      {/* PERSPECTIVE SWITCHER (KHUSUS SUPER ADMIN - DILETAKKAN DI PALING ATAS)   */}
-      {/* ========================================================================= */}
+      {/* PANEL PRATINJAU SUPER ADMIN */}
       {isSuperAdmin && (
         <div className="bg-stone-900 border border-stone-800 text-white p-4 sm:p-5 rounded-3xl shadow-lg space-y-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -363,7 +369,6 @@ export default function DashboardPage() {
               </div>
             </div>
             
-            {/* Pilihan 4 Perspektif Jabatan */}
             <div className="flex flex-wrap items-center gap-1.5 bg-stone-800/80 p-1.5 rounded-2xl border border-stone-700/60">
               {[
                 { id: 'STAF', label: 'Staf' },
@@ -386,7 +391,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Pemilih Simulasi Unit Kerja */}
           {activePerspective !== 'KEPALA_KANWIL' && unitList.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-800 text-xs">
               <span className="text-stone-400 font-medium">Simulasi Unit Kerja:</span>
@@ -421,7 +425,7 @@ export default function DashboardPage() {
             </span>
           </div>
           <p className="text-xs text-stone-500 mt-0.5">
-            {activePerspective === 'STAF' && 'Pantau dan eksekusi tugas serta sub-tugas yang ditugaskan kepada Anda.'}
+            {activePerspective === 'STAF' && 'Pantau dan eksekusi tugas serta sub-tugas yang ditugaskan kepada Anda atau unit Anda.'}
             {activePerspective === 'KEPALA_SEKSI' && 'Monitoring progres capaian seksi, beban kerja staf, dan mitigasi kendala.'}
             {activePerspective === 'KEPALA_UNIT' && 'Evaluasi kesehatan kinerja antar-seksi dan deteksi titik kritis kantor.'}
             {activePerspective === 'KEPALA_KANWIL' && 'Postur kepatuhan dan peringkat kinerja seluruh KPPN dan Bidang se-Wilayah.'}
@@ -473,9 +477,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* ========================================================= */}
-      {/* PERSPEKTIF 1: STAF (FOKUS TUGAS PRIBADI, TANPA GRAFIK BEBAN) */}
-      {/* ========================================================= */}
+      {/* PERSPEKTIF 1: STAF */}
       {activePerspective === 'STAF' && (
         <div className="space-y-6">
           <UrgentTaskTable 
@@ -485,9 +487,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* PERSPEKTIF 2: KEPALA SEKSI (WORKLOAD STAF & RADAR KENDALA) */}
-      {/* ========================================================= */}
+      {/* PERSPEKTIF 2: KEPALA SEKSI */}
       {activePerspective === 'KEPALA_SEKSI' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -520,9 +520,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* PERSPEKTIF 3: KEPALA KANTOR (MATRIKS PERFORMA ANTAR-SEKSI) */}
-      {/* ========================================================= */}
+      {/* PERSPEKTIF 3: KEPALA KANTOR */}
       {activePerspective === 'KEPALA_UNIT' && (
         <div className="space-y-6">
           <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
@@ -574,9 +572,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* PERSPEKTIF 4: KEPALA KANWIL (LEADERBOARD REGIONAL SATKER) */}
-      {/* ========================================================= */}
+      {/* PERSPEKTIF 4: KEPALA KANWIL */}
       {activePerspective === 'KEPALA_KANWIL' && (
         <div className="space-y-6">
           <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
