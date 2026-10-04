@@ -1,14 +1,27 @@
-// components/layout/topbar.tsx
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { ChevronDown, UserCircle2, User, LogOut, CalendarDays, Check, HelpCircle } from 'lucide-react';
+import { 
+  ChevronDown, 
+  UserCircle2, 
+  User, 
+  LogOut, 
+  CalendarDays, 
+  Check, 
+  HelpCircle,
+  X,
+  ChevronRight,
+  Sparkles,
+  LayoutDashboard,
+  ListTodo,
+  Bell
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { NotificationBell } from './notification-bell';
-import { TutorialTour } from '@/components/ui/tutorial-tour';
 
+// DATA PILIHAN PERIODE
 const PERIOD_OPTIONS = [
   { id: 'ALL', label: 'Semua Periode', desc: 'Tampilkan seluruh tugas tahun ini' },
   { id: 'CURRENT_MONTH', label: 'Bulan Berjalan', desc: 'Bulan aktif saat ini' },
@@ -21,6 +34,144 @@ const PERIOD_OPTIONS = [
   { id: 'TAHUNAN', label: 'Tahunan', desc: 'Sepanjang tahun' },
 ];
 
+// DATA ONBOARDING TUTORIAL TOUR
+const TOUR_STEPS = [
+  {
+    title: 'Selamat Datang di Gov-Task-Monitor! 👋',
+    description: 'Portal pemantauan tusi, kepatuhan, dan pekerjaan instansi vertikal berjenjang. Mari luangkan 1 menit untuk mengenal fitur utama aplikasi.',
+    icon: Sparkles,
+    badge: 'Pengenalan',
+  },
+  {
+    title: '1. Pemilih Periode Fleksibel 📅',
+    description: 'Di bagian pojok kanan atas, Anda dapat memilih siklus periode (Bulanan, Triwulanan TW I–IV, Semesteran, atau Tahunan). Semua metrik dashboard dan filter tugas otomatis menyesuaikan.',
+    icon: Bell,
+    badge: 'Filter Periode',
+  },
+  {
+    title: '2. Daftar Tugas & Sub-Pekerjaan 📋',
+    description: 'Buka menu "Daftar Tugas" untuk mengelola pekerjaan. Anda dapat membuka/tutup uraian deskripsi, melihat link regulasi dasar hukum, checklist tahapan sub-pekerjaan, serta akses instan tautan bukti dokumen.',
+    icon: ListTodo,
+    badge: 'Manajemen Pekerjaan',
+  },
+  {
+    title: '3. Dashboard Berjenjang 4 Perspektif 📊',
+    description: 'Dashboard beradaptasi otomatis sesuai peran Anda: dari Staf pelaksana, Kepala Seksi (beban kerja staf), Kepala Unit (matriks kesehatan KPPN), hingga Kepala Kanwil (peringkat wilayah).',
+    icon: LayoutDashboard,
+    badge: 'Monitoring Realtime',
+  },
+];
+
+// KOMPONEN BUBBLE TUTORIAL TOUR
+function TutorialTourModal() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+
+  useEffect(() => {
+    const hasSeenTour = localStorage.getItem('gov_task_tour_completed');
+    if (!hasSeenTour) {
+      const timer = setTimeout(() => setIsOpen(true), 1000);
+      return () => clearTimeout(timer);
+    }
+
+    const handleOpenTour = () => {
+      setCurrentStep(0);
+      setIsOpen(true);
+    };
+
+    window.addEventListener('open-app-tour', handleOpenTour);
+    return () => window.removeEventListener('open-app-tour', handleOpenTour);
+  }, []);
+
+  const handleClose = () => {
+    localStorage.setItem('gov_task_tour_completed', 'true');
+    setIsOpen(false);
+  };
+
+  const handleNext = () => {
+    if (currentStep < TOUR_STEPS.length - 1) {
+      setCurrentStep((prev) => prev + 1);
+    } else {
+      handleClose();
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentStep > 0) {
+      setCurrentStep((prev) => prev - 1);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const step = TOUR_STEPS[currentStep];
+  const StepIcon = step.icon;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white max-w-md w-full rounded-3xl p-6 shadow-2xl border border-stone-200/80 relative space-y-4">
+        <button
+          onClick={handleClose}
+          className="absolute right-4 top-4 p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-full transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-[#DF3B68]/10 text-[#DF3B68] flex items-center justify-center border border-[#DF3B68]/20">
+            <StepIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#DF3B68] bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-100">
+              {step.badge} ({currentStep + 1}/{TOUR_STEPS.length})
+            </span>
+            <h3 className="font-bold text-stone-900 text-sm mt-1">{step.title}</h3>
+          </div>
+        </div>
+
+        <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3.5 rounded-2xl border border-stone-200/60">
+          {step.description}
+        </p>
+
+        <div className="flex items-center justify-between pt-2 border-t border-stone-100">
+          <div className="flex items-center gap-1.5">
+            {TOUR_STEPS.map((_, idx) => (
+              <div
+                key={idx}
+                className={`h-1.5 rounded-full transition-all ${
+                  idx === currentStep ? 'w-5 bg-[#DF3B68]' : 'w-1.5 bg-stone-200'
+                }`}
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {currentStep > 0 && (
+              <button
+                type="button"
+                onClick={handlePrev}
+                className="px-3 py-1.5 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-semibold"
+              >
+                Kembali
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleNext}
+              className="px-4 py-1.5 rounded-xl bg-[#DF3B68] hover:bg-[#C72F58] text-white text-xs font-semibold flex items-center gap-1 shadow-sm"
+            >
+              <span>{currentStep === TOUR_STEPS.length - 1 ? 'Mulai Eksplorasi' : 'Lanjut'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// TOPBAR CONTENT
 function TopBarContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -89,7 +240,7 @@ function TopBarContent() {
 
   return (
     <>
-      <TutorialTour />
+      <TutorialTourModal />
       <header className="h-20 bg-canvas px-6 md:px-8 flex items-center justify-between border-b border-stone-200/40 sticky top-0 z-30">
         {/* Kiri: Info Unit */}
         <div className="flex items-center gap-3">
@@ -156,7 +307,7 @@ function TopBarContent() {
 
           {profile?.id && <NotificationBell userId={profile.id} />}
 
-          {/* Profil */}
+          {/* Profil Avatar & Dropdown Akun */}
           <div className="relative pl-1" ref={dropdownRef}>
             <button
               type="button"
