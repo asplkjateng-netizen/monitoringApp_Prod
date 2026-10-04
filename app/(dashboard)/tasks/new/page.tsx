@@ -15,7 +15,13 @@ import {
   BookmarkPlus, 
   Clock, 
   Info,
-  Calendar
+  Calendar,
+  Radio,
+  Search,
+  UserX,
+  UserCheck,
+  Building,
+  ShieldCheck
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -26,6 +32,11 @@ interface StaffProfile {
   full_name: string;
   nip: string;
   role: string;
+  unit?: {
+    id: string;
+    name: string;
+    level: string;
+  };
 }
 
 interface TaskTemplate {
@@ -49,7 +60,12 @@ export default function NewTaskPage() {
   // Identitas sesi & unit
   const [userId, setUserId] = useState<string | null>(null);
   const [unitId, setUnitId] = useState<string | null>(null);
+  const [userUnitInfo, setUserUnitInfo] = useState<any>(null);
   const [userTusiType, setUserTusiType] = useState<string>('UMUM');
+  
+  // Kewenangan Broadcast
+  const [canBroadcast, setCanBroadcast] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Sumber data pendukung
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
@@ -64,9 +80,9 @@ export default function NewTaskPage() {
   const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('TRIWULANAN');
   
   // State Pemilih Periode Spesifik
-  const [selectedQuarter, setSelectedQuarter] = useState<number>(1); // 1 = TW I, 2 = TW II, 3 = TW III, 4 = TW IV
-  const [selectedSemester, setSelectedSemester] = useState<number>(1); // 1 = Sem I, 2 = Sem II
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // 1 - 12
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(1);
+  const [selectedSemester, setSelectedSemester] = useState<number>(1);
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
   // Aturan Siklus Fleksibel
@@ -76,7 +92,15 @@ export default function NewTaskPage() {
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState<'TINGGI' | 'SEDANG' | 'RENDAH'>('SEDANG');
 
-  // Multi-PIC & Subtasks dinamis
+  // MODE PENUGASAN (MANUAL vs BROADCAST)
+  const [assignmentMode, setAssignmentMode] = useState<'MANUAL' | 'BROADCAST'>('MANUAL');
+  const [broadcastScope, setBroadcastScope] = useState<'SEKSI' | 'KANTOR' | 'WILAYAH'>('SEKSI');
+  const [broadcastStaffList, setBroadcastStaffList] = useState<StaffProfile[]>([]);
+  const [excludedPicIds, setExcludedPicIds] = useState<string[]>([]);
+  const [exclusionSearch, setExclusionSearch] = useState('');
+  const [loadingBroadcastStaff, setLoadingBroadcastStaff] = useState(false);
+
+  // Multi-PIC Manual & Subtasks
   const [selectedPics, setSelectedPics] = useState<string[]>([]);
   const [subtasks, setSubtasks] = useState<string[]>(['']);
 
@@ -84,12 +108,17 @@ export default function NewTaskPage() {
     fetchInitialData();
   }, []);
 
-  // Hitung ulang deadline setiap kali ada perubahan pada periode spesifik atau aturan batas
   useEffect(() => {
     if (periodType !== 'INSIDENTIL') {
       calculateRecurringDeadline();
     }
   }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay]);
+
+  useEffect(() => {
+    if (assignmentMode === 'BROADCAST' && unitId) {
+      loadBroadcastStaff(broadcastScope);
+    }
+  }, [assignmentMode, broadcastScope, unitId]);
 
   const calculateRecurringDeadline = () => {
     let targetYear = selectedYear;
@@ -175,15 +204,33 @@ export default function NewTaskPage() {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('unit_id, unit:units(id, tusi_type)')
+      .select('id, role, is_unit_admin, unit_id, unit:units(id, name, level, parent_id, tusi_type)')
       .eq('id', user.id)
       .single();
 
     if (profile?.unit_id) {
       setUnitId(profile.unit_id);
+      setUserUnitInfo(profile.unit);
       const tusi = (profile.unit as any)?.tusi_type || 'UMUM';
       setUserTusiType(tusi);
 
+      const roleUpper = String(profile.role || '').toUpperCase();
+      const adminFlag = roleUpper === 'SUPER_ADMIN';
+      const isLeader = ['KEPALA_UNIT', 'KEPALA_SEKSI'].includes(roleUpper) || profile.is_unit_admin === true || (profile.unit as any)?.level === 'ESELON_II';
+
+      setIsSuperAdmin(adminFlag);
+      setCanBroadcast(adminFlag || isLeader);
+
+      // Default scope
+      if (adminFlag || (profile.unit as any)?.level === 'ESELON_II') {
+        setBroadcastScope('WILAYAH');
+      } else if (roleUpper === 'KEPALA_UNIT' || (profile.unit as any)?.level === 'ESELON_III') {
+        setBroadcastScope('KANTOR');
+      } else {
+        setBroadcastScope('SEKSI');
+      }
+
+      // Ambil staf unit lokal
       const { data: staff } = await supabase
         .from('profiles')
         .select('id, full_name, nip, role')
@@ -196,6 +243,7 @@ export default function NewTaskPage() {
         setSelectedPics([user.id]);
       }
 
+      // Ambil template
       const { data: tpl } = await supabase
         .from('task_templates')
         .select('*')
@@ -205,6 +253,43 @@ export default function NewTaskPage() {
     }
 
     setLoading(false);
+  };
+
+  // Muat daftar pegawai untuk Broadcast berdasarkan lingkup yang dipilih
+  const loadBroadcastStaff = async (scope: 'SEKSI' | 'KANTOR' | 'WILAYAH') => {
+    setLoadingBroadcastStaff(true);
+    let targetUnitIds: string[] = [];
+
+    if (scope === 'SEKSI') {
+      if (unitId) targetUnitIds = [unitId];
+    } else if (scope === 'KANTOR') {
+      const currentLevel = userUnitInfo?.level;
+      const parentId = userUnitInfo?.parent_id;
+      const officeId = currentLevel === 'SEKSI' && parentId ? parentId : unitId;
+
+      const { data: childUnits } = await supabase
+        .from('units')
+        .select('id')
+        .eq('parent_id', officeId);
+
+      targetUnitIds = [officeId, ...(childUnits || []).map((u) => u.id)];
+    }
+
+    let query = supabase
+      .from('profiles')
+      .select('id, full_name, nip, role, unit:units(id, name, level)')
+      .eq('approval_status', 'APPROVED')
+      .order('full_name', { ascending: true });
+
+    if (scope !== 'WILAYAH' && targetUnitIds.length > 0) {
+      query = query.in('unit_id', targetUnitIds);
+    }
+
+    const { data: staffData } = await query;
+    if (staffData) {
+      setBroadcastStaffList(staffData as any[]);
+    }
+    setLoadingBroadcastStaff(false);
   };
 
   const handleSelectTemplate = (templateId: string) => {
@@ -237,6 +322,13 @@ export default function NewTaskPage() {
     );
   };
 
+  // Toggle Pengecualian Pegawai
+  const toggleExclusion = (staffId: string) => {
+    setExcludedPicIds((prev) =>
+      prev.includes(staffId) ? prev.filter((id) => id !== staffId) : [...prev, staffId]
+    );
+  };
+
   const handleAddSubtask = () => setSubtasks((prev) => [...prev, '']);
   const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
   const handleSubtaskChange = (index: number, value: string) => {
@@ -264,12 +356,27 @@ export default function NewTaskPage() {
       return;
     }
 
+    // Tentukan PIC Final (Manual vs Broadcast dikurangi Pengecualian)
+    let finalPics: string[] = [];
+    if (assignmentMode === 'BROADCAST') {
+      finalPics = broadcastStaffList
+        .filter((s) => !excludedPicIds.includes(s.id))
+        .map((s) => s.id);
+
+      if (finalPics.length === 0) {
+        setErrorMessage('Tidak ada pegawai penerima tugas. Seluruh pegawai pada lingkup ini dikecualikan.');
+        return;
+      }
+    } else {
+      finalPics = selectedPics;
+    }
+
     setSubmitting(true);
 
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // 1. Simpan ke Katalog Tusi jika dicentang dan bukan berasal dari template yang sudah ada
+      // 1. Simpan ke Katalog Tusi jika dicentang
       if (saveAsTemplate && !createdTemplateId) {
         const { data: newTpl, error: tplError } = await supabase
           .from('task_templates')
@@ -292,7 +399,7 @@ export default function NewTaskPage() {
         }
       }
 
-      // 2. Simpan Tugas Riil Operasional Periode Terpilih
+      // 2. Simpan Tugas Riil Operasional
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -319,17 +426,18 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan PIC Pelaksana
-      if (selectedPics.length > 0) {
-        const picPayloads = selectedPics.map((picUserId) => ({
+      // 3. Simpan Seluruh PIC (Termasuk Penugasan Massal)
+      if (finalPics.length > 0) {
+        const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
           user_id: picUserId,
         }));
         await supabase.from('task_pics').insert(picPayloads);
 
-        const notifPayloads = selectedPics.map((picUserId) => ({
+        // Kirim notifikasi ke semua penerima
+        const notifPayloads = finalPics.map((picUserId) => ({
           user_id: picUserId,
-          title: '📋 Penugasan Tugas Baru',
+          title: assignmentMode === 'BROADCAST' ? '📢 Penugasan Massal Satker' : '📋 Penugasan Tugas Baru',
           message: `Anda ditetapkan sebagai PIC untuk: "${title.trim()}". Batas tenggat: ${deadline}.`,
           action_link: `/tasks/${taskId}`,
           is_read: false,
@@ -366,6 +474,12 @@ export default function NewTaskPage() {
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ];
 
+  const filteredBroadcastStaff = broadcastStaffList.filter((s) =>
+    s.full_name.toLowerCase().includes(exclusionSearch.toLowerCase()) ||
+    s.nip.includes(exclusionSearch) ||
+    (s.unit?.name && s.unit.name.toLowerCase().includes(exclusionSearch.toLowerCase()))
+  );
+
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3">
@@ -378,7 +492,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas klerikal berkala (Bulanan, TW, Semester, Tahunan) atau pekerjaan insidentil.
+            Daftarkan tugas klerikal berkala, penugasan massal satker, atau pekerjaan insidentil.
           </p>
         </div>
       </div>
@@ -419,7 +533,6 @@ export default function NewTaskPage() {
               <span>Rincian Informasi Tugas</span>
             </div>
 
-            {/* OPSI SIMPAN KE KATALOG TUSI & STATUS SIKLUS */}
             <div className="flex flex-wrap items-center gap-2">
               {periodType !== 'INSIDENTIL' && (
                 <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
@@ -428,7 +541,7 @@ export default function NewTaskPage() {
               )}
 
               {!selectedTemplateId ? (
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1 rounded-xl transition-colors shadow-2xs select-none">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl transition-colors select-none">
                   <input
                     type="checkbox"
                     checked={saveAsTemplate}
@@ -450,7 +563,7 @@ export default function NewTaskPage() {
           <div className="space-y-4">
             <Input
               label="Judul / Uraian Tugas *"
-              placeholder="Contoh: Telaah Laporan Keuangan BLU"
+              placeholder="Contoh: Rekonsiliasi Laporan Keuangan UAKPA"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -479,10 +592,9 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus, Pilihan TW/SM, & Formula Fleksibel */}
+          {/* Konfigurasi Siklus & Formula */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {/* 1. Jenis Siklus */}
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Jenis Siklus Pekerjaan *</label>
                 <select
@@ -498,7 +610,6 @@ export default function NewTaskPage() {
                 </select>
               </div>
 
-              {/* 2. Pilihan Triwulan / Semester / Bulan Spesifik */}
               {periodType === 'TRIWULANAN' && (
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Triwulan Tugas *</label>
@@ -546,7 +657,6 @@ export default function NewTaskPage() {
                 </div>
               )}
 
-              {/* 3. Pilihan Tahun Anggaran (Untuk semua siklus kecuali Insidentil) */}
               {periodType !== 'INSIDENTIL' ? (
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 mb-1">Tahun Anggaran *</label>
@@ -571,16 +681,14 @@ export default function NewTaskPage() {
               )}
             </div>
 
-            {/* Panel Hasil Kalkulasi Tenggat & Formula Siklus */}
             {periodType !== 'INSIDENTIL' && (
               <div className="pt-3 border-t border-stone-200/60 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
                     <Clock className="w-4 h-4 text-[#DF3B68]" />
-                    <span>Formula Penentuan Batas Waktu ({periodType === 'TRIWULANAN' ? `TW ${['I', 'II', 'III', 'IV'][selectedQuarter - 1]}` : periodType === 'SEMESTERAN' ? `Semester ${selectedSemester}` : `Bulan ${monthNames[selectedMonth - 1]}`} {selectedYear}):</span>
+                    <span>Formula Penentuan Batas Waktu:</span>
                   </div>
 
-                  {/* Badge Hasil Deadline Terhitung */}
                   <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-emerald-800 text-xs font-bold self-start sm:self-auto">
                     <Calendar className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Tenggat: {deadline || '-'}</span>
@@ -643,16 +751,6 @@ export default function NewTaskPage() {
                     </div>
                   </div>
                 </div>
-
-                <div className="p-3 bg-white rounded-xl border border-stone-200 text-xs text-stone-700 flex items-start gap-2">
-                  <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold text-stone-900">Penjelasan Tenggat Tugas Ini:</p>
-                    <p className="text-[11px] text-stone-600 mt-0.5">
-                      Tugas ini dialokasikan untuk <strong>{periodType === 'TRIWULANAN' ? `Triwulan ${['I', 'II', 'III', 'IV'][selectedQuarter - 1]}` : periodType === 'SEMESTERAN' ? `Semester ${selectedSemester}` : `Bulan ${monthNames[selectedMonth - 1]}`} {selectedYear}</strong>. Berdasarkan formula, batas akhir penyelesaian dokumen jatuh pada tanggal <strong className="text-stone-900 font-mono">{deadline}</strong>.
-                    </p>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -684,40 +782,223 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* Multi-PIC */}
+        {/* ========================================================================= */}
+        {/* CARD PIC PELAKSANA: SWITCHER KHUSUS ADMIN (MANUAL vs BROADCAST MASSAL) */}
+        {/* ========================================================================= */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
               <Users className="w-4 h-4 text-[#DF3B68]" />
-              <span>Tetapkan PIC Pelaksana (Multi-PIC)</span>
+              <span>Tetapkan PIC Pelaksana</span>
             </div>
-            <span className="text-[11px] text-stone-400 font-medium">{selectedPics.length} pegawai dipilih</span>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-1">
-            {staffList.map((staff) => {
-              const isChecked = selectedPics.includes(staff.id);
-              return (
-                <div
-                  key={staff.id}
-                  onClick={() => togglePic(staff.id)}
-                  className={`p-3 rounded-2xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
-                    isChecked
-                      ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900'
-                      : 'border-stone-200/80 bg-white text-stone-600 hover:bg-stone-50'
+            {/* SWITCHER KHUSUS ADMIN */}
+            {canBroadcast && (
+              <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
+                <button
+                  type="button"
+                  onClick={() => setAssignmentMode('MANUAL')}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                    assignmentMode === 'MANUAL'
+                      ? 'bg-white text-stone-900 shadow-xs'
+                      : 'text-stone-500 hover:text-stone-900'
                   }`}
                 >
-                  <div className="truncate pr-2">
-                    <p className="font-semibold truncate">{staff.full_name}</p>
-                    <p className="text-[10px] text-stone-400">NIP. {staff.nip} • {staff.role}</p>
-                  </div>
-                  <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300'}`}>
-                    {isChecked && <CheckCircle2 className="w-3 h-3" />}
+                  Penugasan Manual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignmentMode('BROADCAST')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    assignmentMode === 'BROADCAST'
+                      ? 'bg-[#DF3B68] text-white shadow-xs'
+                      : 'text-stone-600 hover:text-[#DF3B68]'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>Broadcast Massal</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* OPSI 1: PENUGASAN MANUAL STANDAR */}
+          {assignmentMode === 'MANUAL' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-stone-500">
+                <span>Pilih satu atau beberapa pegawai pelaksana di unit Anda:</span>
+                <span className="font-semibold text-stone-700">{selectedPics.length} pegawai dipilih</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-1">
+                {staffList.map((staff) => {
+                  const isChecked = selectedPics.includes(staff.id);
+                  return (
+                    <div
+                      key={staff.id}
+                      onClick={() => togglePic(staff.id)}
+                      className={`p-3 rounded-2xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                        isChecked
+                          ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900'
+                          : 'border-stone-200/80 bg-white text-stone-600 hover:bg-stone-50'
+                      }`}
+                    >
+                      <div className="truncate pr-2">
+                        <p className="font-semibold truncate">{staff.full_name}</p>
+                        <p className="text-[10px] text-stone-400">NIP. {staff.nip} • {staff.role}</p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300'}`}>
+                        {isChecked && <CheckCircle2 className="w-3 h-3" />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* OPSI 2: BROADCAST MASSAL DENGAN DAFTAR PENGECUALIAN (EXCEPTION LIST) */}
+          {assignmentMode === 'BROADCAST' && (
+            <div className="space-y-4 bg-stone-50/70 p-4 sm:p-5 rounded-2xl border border-stone-200">
+              
+              {/* Pemilih Lingkup Instansi Broadcast */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <Building className="w-4 h-4 text-[#DF3B68]" />
+                    <span>Pilih Lingkup Instansi Target Broadcast:</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-stone-500">
+                    Total: {broadcastStaffList.length} Pegawai
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('SEKSI')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'SEKSI'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🏢 Satu Seksi ({userTusiType})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('KANTOR')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'KANTOR'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🏛️ Satu Kantor (Seluruh Seksi KPPN)
+                  </button>
+
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setBroadcastScope('WILAYAH')}
+                      className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                        broadcastScope === 'WILAYAH'
+                          ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                          : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                      }`}
+                    >
+                      🌐 Seluruh Wilayah (Semua KPPN & Kanwil)
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Ringkasan Broadcast */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-stone-200 text-xs">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    Penerima Tugas Aktif: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <UserX className="w-4 h-4 text-rose-500" />
+                  <span>
+                    Dikecualikan: <strong className="text-rose-600 font-bold">{excludedPicIds.length}</strong> pegawai
+                  </span>
+                </div>
+              </div>
+
+              {/* Daftar Pengecualian Pegawai */}
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <UserX className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Daftar Pengecualian Pegawai (Centang untuk mengecualikan):</span>
+                  </p>
+                  
+                  {/* Pencarian nama di daftar pengecualian */}
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                    <input
+                      type="text"
+                      placeholder="Cari nama / NIP untuk dikecualikan..."
+                      value={exclusionSearch}
+                      onChange={(e) => setExclusionSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white rounded-xl border border-stone-200 focus:outline-none focus:ring-1 focus:ring-[#DF3B68]"
+                    />
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {loadingBroadcastStaff ? (
+                  <div className="py-6 text-center text-xs text-stone-400">Memuat data pegawai...</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredBroadcastStaff.map((staff) => {
+                      const isExcluded = excludedPicIds.includes(staff.id);
+                      return (
+                        <div
+                          key={staff.id}
+                          onClick={() => toggleExclusion(staff.id)}
+                          className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                            isExcluded
+                              ? 'border-rose-300 bg-rose-50/60 text-stone-400'
+                              : 'border-stone-200 bg-white text-stone-800 hover:bg-stone-50'
+                          }`}
+                        >
+                          <div className="truncate pr-2">
+                            <p className={`font-semibold truncate ${isExcluded ? 'line-through text-stone-400' : 'text-stone-900'}`}>
+                              {staff.full_name}
+                            </p>
+                            <p className="text-[10px] text-stone-400">
+                              {staff.role} • {staff.unit?.name || 'Unit'}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {isExcluded ? (
+                              <span className="text-[10px] font-bold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-200">
+                                Dikecualikan
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                Menerima
+                              </span>
+                            )}
+                            <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'border-stone-300'}`}>
+                              {isExcluded && <CheckCircle2 className="w-3 h-3" />}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
         </div>
 
         {/* Sub-Pekerjaan Awal */}
