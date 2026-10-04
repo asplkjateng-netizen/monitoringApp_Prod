@@ -58,8 +58,9 @@ export default function TusiCatalogPage() {
   const [editTitle, setEditTitle] = useState('');
   const [editTusiType, setEditTusiType] = useState('MSKI');
   const [editPeriodType, setEditPeriodType] = useState<PeriodType>('BULANAN');
-  const [editDeadlineRule, setEditDeadlineRule] = useState('END_OF_PERIOD');
-  const [editExactDay, setEditExactDay] = useState(31);
+  const [editDeadlineRule, setEditDeadlineRule] = useState('NEXT_MONTH_DATE');
+  const [editExactDay, setEditExactDay] = useState(15);
+  const [editCustomDayInput, setEditCustomDayInput] = useState('15');
   const [editDescription, setEditDescription] = useState('');
   const [editLegalBasis, setEditLegalBasis] = useState('');
 
@@ -101,8 +102,10 @@ export default function TusiCatalogPage() {
     setEditTitle(template.title);
     setEditTusiType(template.tusi_type || 'MSKI');
     setEditPeriodType(template.period_type || 'BULANAN');
-    setEditDeadlineRule(template.deadline_rule || 'END_OF_PERIOD');
-    setEditExactDay(template.exact_day || 31);
+    setEditDeadlineRule(template.deadline_rule || 'NEXT_MONTH_DATE');
+    const day = template.exact_day || 15;
+    setEditExactDay(day);
+    setEditCustomDayInput(String(day));
     setEditDescription(template.description || '');
     setEditLegalBasis(template.legal_basis || '');
     setErrorMsg('');
@@ -183,19 +186,32 @@ export default function TusiCatalogPage() {
         if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
       }
     } else if (template.period_type === 'TRIWULANAN') {
-      const qEnd = Math.ceil(currentMonth / 3) * 3;
-      targetMonth = rule === 'NEXT_MONTH_DATE' ? qEnd + 1 : qEnd;
-      if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+      const currentQuarter = Math.ceil(currentMonth / 3);
+      const qEnd = currentQuarter * 3;
+      const qStart = (currentQuarter - 1) * 3 + 1;
+
+      if (rule === 'END_OF_PERIOD') targetMonth = qEnd;
+      else if (rule === 'NEXT_MONTH_DATE') {
+        targetMonth = qEnd + 1;
+        if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+      } else if (rule === 'SAME_MONTH_DATE') targetMonth = qStart;
     } else if (template.period_type === 'SEMESTERAN') {
-      const sEnd = currentMonth <= 6 ? 6 : 12;
-      targetMonth = rule === 'NEXT_MONTH_DATE' ? sEnd + 1 : sEnd;
-      if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+      const isSem1 = currentMonth <= 6;
+      const sEnd = isSem1 ? 6 : 12;
+      const sStart = isSem1 ? 1 : 7;
+
+      if (rule === 'END_OF_PERIOD') targetMonth = sEnd;
+      else if (rule === 'NEXT_MONTH_DATE') {
+        targetMonth = sEnd + 1;
+        if (targetMonth > 12) { targetMonth = 1; targetYear += 1; }
+      } else if (rule === 'SAME_MONTH_DATE') targetMonth = sStart;
     } else if (template.period_type === 'TAHUNAN') {
-      targetMonth = 12;
+      if (rule === 'NEXT_MONTH_DATE') { targetMonth = 1; targetYear += 1; }
+      else targetMonth = 12;
     }
 
     const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
-    const finalDay = rule === 'END_OF_PERIOD' || day >= 31 ? daysInMonth : Math.min(day, daysInMonth);
+    const finalDay = day >= 31 ? daysInMonth : Math.min(day, daysInMonth);
     return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
   };
 
@@ -372,9 +388,7 @@ export default function TusiCatalogPage() {
                     <div className="pt-1 flex items-center gap-1 text-[10px] font-medium text-stone-500">
                       <Clock className="w-3 h-3 text-[#DF3B68]" />
                       <span>
-                        {t.deadline_rule === 'END_OF_PERIOD'
-                          ? 'Batas: Akhir Periode'
-                          : `Batas: Tgl ${t.exact_day === 31 ? 'Akhir Bulan' : t.exact_day} (${t.deadline_rule === 'NEXT_MONTH_DATE' ? 'M+1' : 'Bulan Berjalan'})`}
+                        {`Batas: ${t.exact_day === 31 ? 'Akhir Bulan' : `Tgl ${t.exact_day}`} (${t.deadline_rule === 'NEXT_MONTH_DATE' ? 'M+1' : t.deadline_rule === 'SAME_MONTH_DATE' ? 'Awal Periode' : 'Akhir Periode'})`}
                       </span>
                     </div>
                   )}
@@ -461,41 +475,64 @@ export default function TusiCatalogPage() {
                 </div>
               </div>
 
-              {/* Aturan Formula Batas Edit */}
+              {/* Aturan Formula Batas Edit Fleksibel */}
               {editPeriodType !== 'INSIDENTIL' && (
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
                   <span className="text-xs font-bold text-stone-800 block">Formula Batas Tenggat Siklus:</span>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[10px] text-stone-500 mb-0.5">Ketentuan:</label>
+                      <label className="block text-[10px] text-stone-500 mb-0.5">1. Posisi Bulan:</label>
                       <select
                         value={editDeadlineRule}
                         onChange={(e) => setEditDeadlineRule(e.target.value)}
                         className="w-full p-2 rounded-lg border border-stone-200 bg-white text-xs"
                       >
-                        <option value="END_OF_PERIOD">Akhir Periode</option>
                         <option value="NEXT_MONTH_DATE">Bulan Berikutnya (M+1)</option>
-                        <option value="SAME_MONTH_DATE">Bulan Berjalan</option>
+                        <option value="END_OF_PERIOD">Bulan Terakhir Periode</option>
+                        <option value="SAME_MONTH_DATE">Awal Periode</option>
                       </select>
                     </div>
 
-                    {editDeadlineRule !== 'END_OF_PERIOD' && (
-                      <div>
-                        <label className="block text-[10px] text-stone-500 mb-0.5">Tanggal:</label>
+                    <div>
+                      <label className="block text-[10px] text-stone-500 mb-0.5">2. Tanggal:</label>
+                      <div className="flex gap-1.5">
                         <select
-                          value={editExactDay}
-                          onChange={(e) => setEditExactDay(Number(e.target.value))}
-                          className="w-full p-2 rounded-lg border border-stone-200 bg-white text-xs"
+                          value={editExactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(editExactDay) ? String(editExactDay) : 'CUSTOM'}
+                          onChange={(e) => {
+                            if (e.target.value === 'CUSTOM') {
+                              setEditExactDay(15);
+                              setEditCustomDayInput('15');
+                            } else {
+                              const val = Number(e.target.value);
+                              setEditExactDay(val);
+                              setEditCustomDayInput(String(val));
+                            }
+                          }}
+                          className="w-1/2 p-2 rounded-lg border border-stone-200 bg-white text-xs"
                         >
-                          <option value={31}>Akhir Bulan</option>
-                          <option value={5}>Tgl 5</option>
-                          <option value={10}>Tgl 10</option>
-                          <option value={15}>Tgl 15</option>
-                          <option value={20}>Tgl 20</option>
-                          <option value={25}>Tgl 25</option>
+                          <option value="31">Akhir Bulan</option>
+                          <option value="5">Tgl 5</option>
+                          <option value="10">Tgl 10</option>
+                          <option value="15">Tgl 15</option>
+                          <option value="20">Tgl 20</option>
+                          <option value="25">Tgl 25</option>
+                          <option value="CUSTOM">Bebas</option>
                         </select>
+
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={editCustomDayInput}
+                          onChange={(e) => {
+                            setEditCustomDayInput(e.target.value);
+                            const val = Number(e.target.value);
+                            if (val >= 1 && val <= 31) setEditExactDay(val);
+                          }}
+                          className="w-1/2 p-2 rounded-lg border border-stone-200 bg-white text-xs font-mono text-center"
+                        />
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               )}
