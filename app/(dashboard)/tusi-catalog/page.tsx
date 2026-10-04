@@ -14,7 +14,9 @@ import {
   Trash2, 
   X, 
   AlertCircle,
-  Clock
+  Clock,
+  Building2,
+  Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +46,9 @@ export default function TusiCatalogPage() {
 
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null);
+  const [userTusiType, setUserTusiType] = useState<string>('UMUM');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedTusi, setSelectedTusi] = useState('ALL');
@@ -56,7 +61,7 @@ export default function TusiCatalogPage() {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editTitle, setEditTitle] = useState('');
-  const [editTusiType, setEditTusiType] = useState('MSKI');
+  const [editTusiType, setEditTusiType] = useState('ASPLK');
   const [editPeriodType, setEditPeriodType] = useState<PeriodType>('BULANAN');
   const [editDeadlineRule, setEditDeadlineRule] = useState('NEXT_MONTH_DATE');
   const [editExactDay, setEditExactDay] = useState(15);
@@ -71,14 +76,28 @@ export default function TusiCatalogPage() {
   const loadUserAndTemplates = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
+    
+    let currentTusi = 'UMUM';
+    let adminFlag = false;
+
     if (user) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id, role, unit_id')
+        .select('id, role, unit_id, unit:units(id, name, code, tusi_type)')
         .eq('id', user.id)
         .single();
-      if (profile) setCurrentUserProfile(profile);
+
+      if (profile) {
+        setCurrentUserProfile(profile);
+        currentTusi = (profile.unit as any)?.tusi_type || 'UMUM';
+        adminFlag = String(profile.role).toUpperCase() === 'SUPER_ADMIN';
+        
+        setUserTusiType(currentTusi);
+        setIsSuperAdmin(adminFlag);
+        setSelectedTusi(adminFlag ? 'ALL' : currentTusi);
+      }
     }
+
     await fetchTemplates();
     setLoading(false);
   };
@@ -93,14 +112,14 @@ export default function TusiCatalogPage() {
 
   const canManageTemplate = (template: TemplateItem) => {
     if (!currentUserProfile) return false;
-    if (currentUserProfile.role === 'SUPER_ADMIN') return true;
+    if (isSuperAdmin) return true;
     return currentUserProfile.unit_id === template.created_by_unit;
   };
 
   const openEditModal = (template: TemplateItem) => {
     setEditingTemplateId(template.id);
     setEditTitle(template.title);
-    setEditTusiType(template.tusi_type || 'MSKI');
+    setEditTusiType(template.tusi_type || 'ASPLK');
     setEditPeriodType(template.period_type || 'BULANAN');
     setEditDeadlineRule(template.deadline_rule || 'NEXT_MONTH_DATE');
     const day = template.exact_day || 15;
@@ -169,7 +188,6 @@ export default function TusiCatalogPage() {
     }
   };
 
-  // Helper kalkulasi deadline saat kloning manual
   const calculateDeadlineForClone = (template: TemplateItem): string => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -215,54 +233,90 @@ export default function TusiCatalogPage() {
     return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
   };
 
+  // KLONING TUGAS: Otomatis masuk ke unit staf yang login & otomatis jadikan staf sebagai PIC
   const handleCloneTask = async (template: TemplateItem) => {
     setCloningId(template.id);
     const { data: { user } } = await supabase.auth.getUser();
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('unit_id')
-      .eq('id', user?.id)
-      .single();
 
-    if (!profile) {
+    if (!user || !currentUserProfile?.unit_id) {
       setCloningId(null);
+      setErrorMsg('Sesi tidak valid. Harap muat ulang halaman.');
       return;
     }
 
     const now = new Date();
     const deadlineStr = calculateDeadlineForClone(template);
 
-    const { error } = await supabase.from('tasks').insert({
-      unit_id: profile.unit_id,
-      template_id: template.id,
-      title: template.title,
-      description: template.description,
-      legal_basis: template.legal_basis,
-      period_type: template.period_type,
-      period_month: now.getMonth() + 1,
-      period_year: now.getFullYear(),
-      deadline: deadlineStr,
-      status: 'BELUM_DIKERJAKAN',
-      progress_pct: 0,
-      created_by: user?.id,
+    // Hitung period_month akurat
+    let periodMonth = now.getMonth() + 1;
+    if (template.period_type === 'TRIWULANAN') {
+      periodMonth = Math.ceil(periodMonth / 3) * 3;
+    } else if (template.period_type === 'SEMESTERAN') {
+      periodMonth = periodMonth <= 6 ? 6 : 12;
+    } else if (template.period_type === 'TAHUNAN') {
+      periodMonth = 12;
+    }
+
+    // 1. Insert ke tabel tasks unit pemohon
+    const { data: newTask, error: taskError } = await supabase
+      .from('tasks')
+      .insert({
+        unit_id: currentUserProfile.unit_id,
+        template_id: template.id,
+        title: template.title,
+        description: template.description,
+        legal_basis: template.legal_basis,
+        period_type: template.period_type,
+        period_month: periodMonth,
+        period_year: now.getFullYear(),
+        deadline: deadlineStr,
+        status: 'BELUM_DIKERJAKAN',
+        progress_pct: 0,
+        created_by: user.id,
+      })
+      .select('id')
+      .single();
+
+    if (taskError || !newTask) {
+      setCloningId(null);
+      setErrorMsg(`Gagal mengkloning: ${taskError?.message || 'Kesalahan sistem'}`);
+      return;
+    }
+
+    // 2. Daftarkan staf pengkloning langsung sebagai PIC di task_pics
+    await supabase.from('task_pics').insert({
+      task_id: newTask.id,
+      user_id: user.id,
     });
 
     setCloningId(null);
-    if (!error) {
-      setSuccessMsg(`Tusi "${template.title}" berhasil dikloning dengan batas tenggat: ${deadlineStr}!`);
-      setTimeout(() => setSuccessMsg(''), 4000);
-    }
+    setSuccessMsg(
+      `Tusi "${template.title}" berhasil dikloning ke unit Anda dan otomatis masuk ke daftar tugas Anda! (Tenggat: ${deadlineStr})`
+    );
+    setTimeout(() => setSuccessMsg(''), 4500);
   };
 
-  const availableTusiTypes = ['ALL', 'MSKI', 'PD', 'BANK', 'VERA', 'UMUM'];
+  // Kumpulan tombol filter tusi dinamis dari data yang ada
+  const dynamicTusiList = Array.from(
+    new Set(['ALL', userTusiType, ...templates.map((t) => t.tusi_type?.toUpperCase()).filter(Boolean)])
+  );
 
+  // Filter scoped: Staf biasa otomatis hanya melihat Tusi sejenis (misal ASPLK)
   const filtered = templates.filter((t) => {
     const matchSearch =
       t.title.toLowerCase().includes(search.toLowerCase()) ||
       t.tusi_type?.toLowerCase().includes(search.toLowerCase()) ||
       t.legal_basis?.toLowerCase().includes(search.toLowerCase());
-    const matchTusi = selectedTusi === 'ALL' || t.tusi_type === selectedTusi;
-    return matchSearch && matchTusi;
+
+    if (!matchSearch) return false;
+
+    if (!isSuperAdmin) {
+      // Non-admin hanya melihat tusi sejenis (misal ASPLK)
+      return t.tusi_type?.toUpperCase() === userTusiType.toUpperCase();
+    }
+
+    // Super Admin bebas memilih ALL atau tusi spesifik
+    return selectedTusi === 'ALL' || t.tusi_type?.toUpperCase() === selectedTusi.toUpperCase();
   });
 
   return (
@@ -270,9 +324,16 @@ export default function TusiCatalogPage() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Bank Tusi & Katalog Pekerjaan</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Bank Tusi & Katalog Pekerjaan</h1>
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-[#DF3B68] border border-rose-200">
+              Seksi {userTusiType}
+            </span>
+          </div>
           <p className="text-xs text-stone-500 mt-1">
-            Koleksi standar tugas fungsi unit vertikal yang dapat diadopsi dan di-generate otomatis.
+            {!isSuperAdmin 
+              ? `Menampilkan standar tugas fungsi Seksi ${userTusiType} dari seluruh unit/KPPN se-wilayah yang dapat Anda adopsi secara instan.`
+              : 'Koleksi master standar tugas fungsi seluruh unit vertikal.'}
           </p>
         </div>
 
@@ -292,32 +353,47 @@ export default function TusiCatalogPage() {
         </div>
       )}
 
+      {errorMsg && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
       {/* Filter & Pencarian Bar */}
       <div className="bg-white border border-stone-200/70 rounded-3xl p-3 md:p-4 shadow-sm flex flex-col md:flex-row items-center gap-3">
         <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
           <input
             type="text"
-            placeholder="Cari judul pekerjaan atau dasar hukum..."
+            placeholder={`Cari judul pekerjaan atau dasar hukum ${!isSuperAdmin ? `Seksi ${userTusiType}...` : '...'}`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
           />
         </div>
 
-        <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
-          {availableTusiTypes.map((type) => (
-            <button
-              key={type}
-              onClick={() => setSelectedTusi(type)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                selectedTusi === type ? 'bg-stone-900 text-white shadow-xs' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
+        {/* Filter Tusi: Super Admin dapat memilih kategori lain, staf biasa terkunci pada Tusi unitnya */}
+        {isSuperAdmin ? (
+          <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
+            {dynamicTusiList.map((type) => (
+              <button
+                key={type}
+                onClick={() => setSelectedTusi(type)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                  selectedTusi === type ? 'bg-stone-900 text-white shadow-xs' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200 text-xs text-stone-600">
+            <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
+            <span>Kategori: <strong>{userTusiType} (Terkunci Sesuai Unit)</strong></span>
+          </div>
+        )}
       </div>
 
       {/* Grid Katalog Template */}
@@ -329,8 +405,12 @@ export default function TusiCatalogPage() {
         ) : filtered.length === 0 ? (
           <div className="col-span-full bg-white border border-stone-200/60 rounded-3xl p-12 text-center space-y-2 shadow-sm">
             <ShieldAlert className="w-8 h-8 text-stone-300 mx-auto" />
-            <p className="text-xs font-semibold text-stone-700">Belum ada template tusi yang sesuai</p>
-            <p className="text-[11px] text-stone-400">Silakan sesuaikan kata kunci pencarian atau tambah standar tusi baru.</p>
+            <p className="text-xs font-semibold text-stone-700">
+              Belum ada master tusi untuk kategori {userTusiType}
+            </p>
+            <p className="text-[11px] text-stone-400">
+              Tugas yang Anda rekam dengan opsi "Simpan ke Katalog Tusi" akan otomatis muncul di sini untuk dikloning oleh seksi Anda.
+            </p>
           </div>
         ) : (
           filtered.map((t) => {
@@ -383,7 +463,6 @@ export default function TusiCatalogPage() {
                     <p className="text-[11px] text-stone-400 italic">Dasar: {t.legal_basis}</p>
                   )}
 
-                  {/* Formula Badge */}
                   {t.period_type !== 'INSIDENTIL' && (
                     <div className="pt-1 flex items-center gap-1 text-[10px] font-medium text-stone-500">
                       <Clock className="w-3 h-3 text-[#DF3B68]" />
@@ -475,7 +554,6 @@ export default function TusiCatalogPage() {
                 </div>
               </div>
 
-              {/* Aturan Formula Batas Edit Fleksibel */}
               {editPeriodType !== 'INSIDENTIL' && (
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
                   <span className="text-xs font-bold text-stone-800 block">Formula Batas Tenggat Siklus:</span>
