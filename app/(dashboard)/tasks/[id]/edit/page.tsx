@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle2, FileText, Users, AlertCircle, Save, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Users, AlertCircle, Save, Loader2, Link as LinkIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ export default function EditTaskPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
+  const [legalBasisLink, setLegalBasisLink] = useState('');
   const [periodType, setPeriodType] = useState<string>('BULANAN');
   const [periodMonth, setPeriodMonth] = useState<number>(1);
   const [periodYear, setPeriodYear] = useState<number>(2026);
@@ -37,7 +38,6 @@ export default function EditTaskPage() {
   const loadTaskAndStaff = async () => {
     setLoading(true);
 
-    // 1. Ambil data task saat ini
     const { data: task, error } = await supabase
       .from('tasks')
       .select('*')
@@ -53,13 +53,13 @@ export default function EditTaskPage() {
     setTitle(task.title);
     setDescription(task.description || '');
     setLegalBasis(task.legal_basis || '');
+    setLegalBasisLink(task.legal_basis_link || '');
     setPeriodType(task.period_type);
     setPeriodMonth(task.period_month || 1);
     setPeriodYear(task.period_year);
     setDeadline(task.deadline);
     setPriority(task.priority);
 
-    // 2. Ambil staf unit untuk PIC
     const { data: staff } = await supabase
       .from('profiles')
       .select('id, full_name, nip, role')
@@ -68,7 +68,6 @@ export default function EditTaskPage() {
 
     if (staff) setStaffList(staff);
 
-    // 3. Ambil PIC yang sudah terpilih saat ini
     const { data: currentPics } = await supabase
       .from('task_pics')
       .select('user_id')
@@ -94,7 +93,6 @@ export default function EditTaskPage() {
     setErrorMessage('');
 
     try {
-      // 1. Dapatkan daftar PIC eksisting sebelum diubah untuk perbandingan mutasi
       const { data: existingPicsData } = await supabase
         .from('task_pics')
         .select('user_id')
@@ -102,13 +100,14 @@ export default function EditTaskPage() {
       
       const previousPicIds = (existingPicsData || []).map((p) => p.user_id);
 
-      // 2. Update data pokok task
+      // Simpan pembaruan data tugas pokok termasuk link dasar hukum
       const { error: taskError } = await supabase
         .from('tasks')
         .update({
           title: title.trim(),
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
+          legal_basis_link: legalBasisLink.trim() || null,
           period_type: periodType as any,
           period_month: periodMonth,
           period_year: periodYear,
@@ -120,7 +119,7 @@ export default function EditTaskPage() {
 
       if (taskError) throw taskError;
 
-      // 3. Update Relasi Multi-PIC (Hapus lama, masukkan baru)
+      // Update Relasi Multi-PIC
       await supabase.from('task_pics').delete().eq('task_id', taskId);
 
       if (selectedPics.length > 0) {
@@ -130,7 +129,6 @@ export default function EditTaskPage() {
         }));
         await supabase.from('task_pics').insert(picPayloads);
 
-        // [BACKLOG-1] Notifikasi khusus untuk PIC baru yang ditambahkan
         const newlyAddedPics = selectedPics.filter((id) => !previousPicIds.includes(id));
         if (newlyAddedPics.length > 0) {
           const notifs = newlyAddedPics.map((uid) => ({
@@ -167,7 +165,7 @@ export default function EditTaskPage() {
         </Link>
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Edit Rincian Tugas</h1>
-          <p className="text-xs text-stone-500 mt-0.5">Perbarui informasi tugas pokok, tenggat waktu, atau mutasi Multi-PIC pelaksana.</p>
+          <p className="text-xs text-stone-500 mt-0.5">Perbarui rincian tugas pokok, regulasi & link dasar hukum, serta PIC pelaksana.</p>
         </div>
       </div>
 
@@ -193,23 +191,41 @@ export default function EditTaskPage() {
               required
             />
 
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Peraturan</label>
-              <input
-                type="text"
-                value={legalBasis}
-                onChange={(e) => setLegalBasis(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900"
-              />
+            {/* Input Dasar Hukum & Tautan Regulasi */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1 text-left">
+                <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Nomor Regulasi</label>
+                <input
+                  type="text"
+                  placeholder="Contoh: PER-5/PB/2024"
+                  value={legalBasis}
+                  onChange={(e) => setLegalBasis(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                />
+              </div>
+
+              <div className="space-y-1 text-left">
+                <label className="block text-xs font-semibold text-stone-600">Tautan Link Regulasi (JDIH / Cloud)</label>
+                <div className="relative">
+                  <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="url"
+                    placeholder="https://jdih.kemenkeu.go.id/..."
+                    value={legalBasisLink}
+                    onChange={(e) => setLegalBasisLink(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 font-mono"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1 text-left">
               <label className="block text-xs font-semibold text-stone-600">Deskripsi / Petunjuk Teknis</label>
               <textarea
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 resize-none"
+                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 resize-none focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
               />
             </div>
           </div>
