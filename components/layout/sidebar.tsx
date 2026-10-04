@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { 
@@ -11,21 +12,42 @@ import {
   LogOut, 
   ShieldCheck,
   User,
-  FileSpreadsheet
+  FileSpreadsheet,
+  FolderTree
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import type { Profile } from '@/types/database.types';
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  useEffect(() => {
+    async function getProfile() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      if (data) setProfile(data as Profile);
+    }
+    getProfile();
+  }, [supabase]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/login');
     router.refresh();
   };
+
+  const isSuperAdmin = profile?.role === 'SUPER_ADMIN';
+  const isUnitAdmin = profile?.is_unit_admin === true;
+  const hasAdminAccess = isSuperAdmin || isUnitAdmin;
 
   const menuGroups = [
     {
@@ -40,16 +62,19 @@ export function Sidebar() {
       label: 'BANK DATA',
       items: [
         { label: 'Katalog Tusi', href: '/tusi-catalog', icon: BookOpen },
+        ...(isSuperAdmin ? [
+          { label: 'Katalog Hierarki', href: '/admin/hierarchy-catalog', icon: FolderTree }
+        ] : []),
       ],
     },
-    {
+    ...(hasAdminAccess ? [{
       label: 'ADMINISTRASI',
       items: [
         { label: 'Verifikasi Pegawai', href: '/admin/approvals', icon: ShieldCheck },
         { label: 'Pegawai & Role', href: '/admin/users', icon: Users },
         { label: 'Hierarki Unit', href: '/admin/units', icon: Building2 },
       ],
-    },
+    }] : []),
     {
       label: 'PENGATURAN',
       items: [
