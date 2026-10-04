@@ -8,7 +8,8 @@ import { createClient } from '@/lib/supabase/client';
 import { NotificationBell } from './notification-bell';
 
 const PERIOD_OPTIONS = [
-  { id: 'CURRENT_MONTH', label: 'Bulan Berjalan', desc: 'Bulan ini' },
+  { id: 'ALL', label: 'Semua Periode', desc: 'Tampilkan seluruh tugas tahun ini' },
+  { id: 'CURRENT_MONTH', label: 'Bulan Berjalan', desc: 'Bulan aktif saat ini' },
   { id: 'TW_1', label: 'Triwulan I (TW I)', desc: 'Jan - Mar' },
   { id: 'TW_2', label: 'Triwulan II (TW II)', desc: 'Apr - Jun' },
   { id: 'TW_3', label: 'Triwulan III (TW III)', desc: 'Jul - Sep' },
@@ -16,7 +17,6 @@ const PERIOD_OPTIONS = [
   { id: 'SEMESTER_1', label: 'Semester I', desc: 'Jan - Jun' },
   { id: 'SEMESTER_2', label: 'Semester II', desc: 'Jul - Des' },
   { id: 'TAHUNAN', label: 'Tahunan', desc: 'Sepanjang tahun' },
-  { id: 'ALL', label: 'Semua Periode', desc: 'Tampilkan seluruhnya' },
 ];
 
 function TopBarContent() {
@@ -32,7 +32,8 @@ function TopBarContent() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const periodRef = useRef<HTMLDivElement>(null);
 
-  const activePeriod = searchParams?.get('period') || 'CURRENT_MONTH';
+  // Default periode adalah 'ALL' (Semua Periode)
+  const activePeriod = searchParams?.get('period') || 'ALL';
   const selectedPeriodObj = PERIOD_OPTIONS.find((p) => p.id === activePeriod) || PERIOD_OPTIONS[0];
 
   useEffect(() => {
@@ -188,7 +189,6 @@ function TopBarContent() {
   );
 }
 
-// Fallback skeleton sederhana saat TopBarContent dimuat
 function TopBarSkeleton() {
   return (
     <header className="h-20 bg-canvas px-6 md:px-8 flex items-center justify-between border-b border-stone-200/40 sticky top-0 z-30">
@@ -201,7 +201,6 @@ function TopBarSkeleton() {
   );
 }
 
-// Export utama yang dibungkus Suspense agar lolos build Next.js 15
 export function TopBar() {
   return (
     <Suspense fallback={<TopBarSkeleton />}>
