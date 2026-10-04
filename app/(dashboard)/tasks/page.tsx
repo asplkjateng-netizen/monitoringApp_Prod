@@ -45,7 +45,8 @@ interface UnitOption {
 function TasksContent() {
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get('status') || 'ALL';
-  const periodParam = searchParams.get('period') || 'CURRENT_MONTH';
+  // Default filter periode sekarang adalah 'ALL' (Semua Periode)
+  const periodParam = searchParams.get('period') || 'ALL';
 
   const supabase = createClient();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -114,7 +115,6 @@ function TasksContent() {
     } else if (selectedUnitFilter !== 'ALL_UNITS') {
       query = query.eq('unit_id', selectedUnitFilter);
     }
-    // Jika 'ALL_UNITS', tidak di-filter unit_id (menampilkan seluruh seksi/KPPN)
 
     const { data, error } = await query;
     if (!error && data) {
@@ -123,10 +123,16 @@ function TasksContent() {
     setLoading(false);
   };
 
+  // Parsing tanggal aman dari pergeseran zona waktu
+  const parseSafeDate = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  };
+
   const getDaysDiff = (deadlineStr: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const dDate = new Date(deadlineStr);
+    const dDate = parseSafeDate(deadlineStr);
     dDate.setHours(0, 0, 0, 0);
     return Math.round((dDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
@@ -135,6 +141,21 @@ function TasksContent() {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 31) return 'bg-amber-400';
     return 'bg-rose-500';
+  };
+
+  // Helper resolusi bulan tugas yang akurat
+  const getTaskMonth = (t: TaskItem): number => {
+    if (t.period_month && t.period_month >= 1 && t.period_month <= 12) {
+      return t.period_month;
+    }
+    if (t.deadline) {
+      const parts = t.deadline.split('-');
+      if (parts.length >= 2) {
+        const parsed = parseInt(parts[1], 10);
+        if (!isNaN(parsed) && parsed >= 1 && parsed <= 12) return parsed;
+      }
+    }
+    return new Date().getMonth() + 1;
   };
 
   // Filter Tasks berdasarkan Search, Status Tab, dan Siklus Periode dari Topbar
@@ -156,30 +177,59 @@ function TasksContent() {
       }
     }
 
-    // Filter Siklus Periode (Sinkronisasi dengan Topbar)
-    const taskDate = new Date(t.deadline);
-    const taskMonth = t.period_month || (taskDate.getMonth() + 1);
+    // Filter Siklus Periode (Sinkronisasi Cerdas dengan Topbar)
+    const taskMonth = getTaskMonth(t);
     const currentMonth = new Date().getMonth() + 1;
 
     switch (periodParam) {
-      case 'CURRENT_MONTH':
-        return taskMonth === currentMonth;
+      case 'CURRENT_MONTH': {
+        // 1. Tugas bulanan / insidentil yang tepat di bulan berjalan
+        if (taskMonth === currentMonth) return true;
+
+        // 2. Tugas Triwulanan yang aktif pada triwulan bulan berjalan saat ini
+        if (t.period_type === 'TRIWULANAN') {
+          const currentQuarter = Math.ceil(currentMonth / 3);
+          const taskQuarter = Math.ceil(taskMonth / 3);
+          if (currentQuarter === taskQuarter) return true;
+        }
+
+        // 3. Tugas Semesteran yang aktif pada semester bulan berjalan saat ini
+        if (t.period_type === 'SEMESTERAN') {
+          const currentSemester = currentMonth <= 6 ? 1 : 2;
+          const taskSemester = taskMonth <= 6 ? 1 : 2;
+          if (currentSemester === taskSemester) return true;
+        }
+
+        // 4. Tugas Tahunan selalu relevan sepanjang tahun berjalan
+        if (t.period_type === 'TAHUNAN') return true;
+
+        return false;
+      }
+
       case 'TW_1':
         return [1, 2, 3].includes(taskMonth);
+
       case 'TW_2':
         return [4, 5, 6].includes(taskMonth);
+
       case 'TW_3':
         return [7, 8, 9].includes(taskMonth);
+
       case 'TW_4':
         return [10, 11, 12].includes(taskMonth);
+
       case 'SEMESTER_1':
         return [1, 2, 3, 4, 5, 6].includes(taskMonth);
+
       case 'SEMESTER_2':
         return [7, 8, 9, 10, 11, 12].includes(taskMonth);
+
       case 'TAHUNAN':
         return t.period_type === 'TAHUNAN';
+
       case 'ALL':
       default:
+        // Menampilkan seluruh tugas tanpa menyembunyikan triwulanan/semesteran
         return true;
     }
   });
@@ -321,8 +371,8 @@ function TasksContent() {
             <p className="text-stone-500 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
             <p className="text-stone-400 text-xs mt-1">
               {selectedUnitFilter === 'MY_UNIT' && isSuperAdmin 
-                ? 'Tip: Pilih opsi "🌐 Seluruh Unit (Regional)" pada dropdown di atas untuk melihat dan mengelola tugas milik KPPN/unit lain.'
-                : 'Coba ubah filter periode di pojok kanan atas atau ganti status tugas.'}
+                ? 'Tip: Pilih opsi "🌐 Seluruh Unit (Regional)" pada dropdown di atas untuk melihat tugas milik KPPN/unit lain.'
+                : 'Coba pilih siklus periode lain di pojok kanan atas atau ubah tab status tugas.'}
             </p>
           </div>
         ) : (
@@ -350,7 +400,7 @@ function TasksContent() {
                     </span>
                     <span className="text-xs text-stone-400 flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5" />
-                      Tenggat: {new Date(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </span>
                   </div>
 
