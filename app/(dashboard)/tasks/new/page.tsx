@@ -15,7 +15,8 @@ import {
   BookmarkPlus, 
   Clock, 
   CalendarCheck2,
-  Info
+  Info,
+  Calendar
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -61,8 +62,14 @@ export default function NewTaskPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
-  const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('BULANAN');
+  const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('TRIWULANAN');
   
+  // State Pemilih Periode Spesifik
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(1); // 1 = TW I, 2 = TW II, 3 = TW III, 4 = TW IV
+  const [selectedSemester, setSelectedSemester] = useState<number>(1); // 1 = Sem I, 2 = Sem II
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // 1 - 12
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+
   // Aturan Siklus Fleksibel
   const [deadlineRule, setDeadlineRule] = useState<'END_OF_PERIOD' | 'NEXT_MONTH_DATE' | 'SAME_MONTH_DATE'>('NEXT_MONTH_DATE');
   const [exactDay, setExactDay] = useState<number>(15);
@@ -78,35 +85,30 @@ export default function NewTaskPage() {
     fetchInitialData();
   }, []);
 
-  // Hitung otomatis deadline berdasarkan formula siklus
+  // Hitung ulang deadline setiap kali ada perubahan pada periode spesifik atau aturan batas
   useEffect(() => {
     if (periodType !== 'INSIDENTIL') {
       calculateRecurringDeadline();
     }
-  }, [periodType, deadlineRule, exactDay]);
+  }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay]);
 
   const calculateRecurringDeadline = () => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1; // 1-12
-
-    let targetYear = currentYear;
-    let targetMonth = currentMonth;
+    let targetYear = selectedYear;
+    let targetMonth = 1;
 
     if (periodType === 'BULANAN') {
       if (deadlineRule === 'NEXT_MONTH_DATE') {
-        targetMonth = currentMonth + 1;
+        targetMonth = selectedMonth + 1;
         if (targetMonth > 12) {
           targetMonth = 1;
           targetYear += 1;
         }
       } else {
-        targetMonth = currentMonth;
+        targetMonth = selectedMonth;
       }
     } else if (periodType === 'TRIWULANAN') {
-      const currentQuarter = Math.ceil(currentMonth / 3);
-      const quarterEndMonth = currentQuarter * 3; // 3, 6, 9, 12
-      const quarterStartMonth = (currentQuarter - 1) * 3 + 1; // 1, 4, 7, 10
+      const quarterEndMonth = selectedQuarter * 3; // TW1: 3 (Mar), TW2: 6 (Jun), TW3: 9 (Sep), TW4: 12 (Des)
+      const quarterStartMonth = (selectedQuarter - 1) * 3 + 1; // TW1: 1 (Jan), TW2: 4 (Apr), TW3: 7 (Jul), TW4: 10 (Okt)
 
       if (deadlineRule === 'END_OF_PERIOD') {
         targetMonth = quarterEndMonth;
@@ -120,9 +122,8 @@ export default function NewTaskPage() {
         targetMonth = quarterStartMonth;
       }
     } else if (periodType === 'SEMESTERAN') {
-      const isSem1 = currentMonth <= 6;
-      const semEndMonth = isSem1 ? 6 : 12;
-      const semStartMonth = isSem1 ? 1 : 7;
+      const semEndMonth = selectedSemester === 1 ? 6 : 12;
+      const semStartMonth = selectedSemester === 1 ? 1 : 7;
 
       if (deadlineRule === 'END_OF_PERIOD') {
         targetMonth = semEndMonth;
@@ -146,7 +147,6 @@ export default function NewTaskPage() {
       }
     }
 
-    // Hitung tanggal valid dalam bulan target
     const daysInTargetMonth = new Date(targetYear, targetMonth, 0).getDate();
     const effectiveDay = exactDay >= 31 ? daysInTargetMonth : Math.min(exactDay, daysInTargetMonth);
 
@@ -155,28 +155,12 @@ export default function NewTaskPage() {
     setDeadline(`${targetYear}-${formattedMonth}-${formattedDay}`);
   };
 
-  const getCyclePreviewSimulation = () => {
-    const dayStr = exactDay >= 31 ? 'Akhir Bulan' : `Tanggal ${exactDay}`;
-    if (periodType === 'TRIWULANAN') {
-      if (deadlineRule === 'NEXT_MONTH_DATE') {
-        return `Simulasi: TW I → ${dayStr} April • TW II → ${dayStr} Juli • TW III → ${dayStr} Oktober • TW IV → ${dayStr} Januari (Thn Berikutnya)`;
-      } else if (deadlineRule === 'END_OF_PERIOD') {
-        return `Simulasi: TW I → ${dayStr} Maret • TW II → ${dayStr} Juni • TW III → ${dayStr} September • TW IV → ${dayStr} Desember`;
-      } else {
-        return `Simulasi: TW I → ${dayStr} Januari • TW II → ${dayStr} April • TW III → ${dayStr} Juli • TW IV → ${dayStr} Oktober`;
-      }
-    } else if (periodType === 'SEMESTERAN') {
-      if (deadlineRule === 'NEXT_MONTH_DATE') {
-        return `Simulasi: Semester I → ${dayStr} Juli • Semester II → ${dayStr} Januari (Thn Berikutnya)`;
-      } else {
-        return `Simulasi: Semester I → ${dayStr} Juni • Semester II → ${dayStr} Desember`;
-      }
-    } else if (periodType === 'BULANAN') {
-      return deadlineRule === 'NEXT_MONTH_DATE'
-        ? `Simulasi: Periode berjalan → ${dayStr} di bulan berikutnya (M+1)`
-        : `Simulasi: Periode berjalan → ${dayStr} di bulan berkenaan`;
-    }
-    return '';
+  const getPeriodMonthValue = (): number => {
+    if (periodType === 'BULANAN') return selectedMonth;
+    if (periodType === 'TRIWULANAN') return selectedQuarter * 3; // simpan bulan akhir TW (3, 6, 9, 12)
+    if (periodType === 'SEMESTERAN') return selectedSemester === 1 ? 6 : 12;
+    if (periodType === 'TAHUNAN') return 12;
+    return new Date().getMonth() + 1;
   };
 
   const fetchInitialData = async () => {
@@ -281,8 +265,8 @@ export default function NewTaskPage() {
 
     try {
       let createdTemplateId = selectedTemplateId || null;
-      const now = new Date();
 
+      // 1. Simpan template jika diminta
       if (saveAsTemplate || (periodType !== 'INSIDENTIL' && !createdTemplateId)) {
         const { data: newTpl, error: tplError } = await supabase
           .from('task_templates')
@@ -305,6 +289,7 @@ export default function NewTaskPage() {
         }
       }
 
+      // 2. Simpan Tugas Riil Periode Terpilih
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -314,8 +299,8 @@ export default function NewTaskPage() {
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
           period_type: periodType,
-          period_month: now.getMonth() + 1,
-          period_year: now.getFullYear(),
+          period_month: getPeriodMonthValue(),
+          period_year: selectedYear,
           deadline,
           priority,
           status: 'BELUM_DIKERJAKAN',
@@ -331,6 +316,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
+      // 3. Simpan PIC
       if (selectedPics.length > 0) {
         const picPayloads = selectedPics.map((picUserId) => ({
           task_id: taskId,
@@ -348,6 +334,7 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
+      // 4. Simpan Subtasks
       const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((stTitle) => ({
@@ -371,6 +358,11 @@ export default function NewTaskPage() {
     return <div className="p-8 text-center text-sm text-stone-500">Menyiapkan formulir rekam tugas...</div>;
   }
 
+  const monthNames = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3">
@@ -383,7 +375,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas klerikal rutin berkala atau pekerjaan insidentil unit kerja.
+            Daftarkan tugas klerikal berkala (Bulanan, TW, Semester, Tahunan) atau pekerjaan insidentil.
           </p>
         </div>
       </div>
@@ -416,7 +408,7 @@ export default function NewTaskPage() {
           </select>
         </div>
 
-        {/* Informasi Pokok & Formula Siklus */}
+        {/* Informasi Pokok */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -444,7 +436,7 @@ export default function NewTaskPage() {
           <div className="space-y-4">
             <Input
               label="Judul / Uraian Tugas *"
-              placeholder="Contoh: Telaah Laporan Keuangan BLU Triwulan I"
+              placeholder="Contoh: Telaah Laporan Keuangan BLU"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -473,9 +465,10 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus & Formula Fleksibel */}
+          {/* Konfigurasi Siklus, Pilihan TW/SM, & Formula Fleksibel */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* 1. Jenis Siklus */}
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Jenis Siklus Pekerjaan *</label>
                 <select
@@ -483,16 +476,75 @@ export default function NewTaskPage() {
                   onChange={(e) => setPeriodType(e.target.value as any)}
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800 focus:ring-2 focus:ring-[#DF3B68]/20"
                 >
-                  <option value="BULANAN">Bulanan (Klerikal Rutin)</option>
                   <option value="TRIWULANAN">Triwulanan (TW I s.d. TW IV)</option>
+                  <option value="BULANAN">Bulanan (Klerikal Rutin)</option>
                   <option value="SEMESTERAN">Semesteran (Semester I & II)</option>
                   <option value="TAHUNAN">Tahunan</option>
-                  <option value="INSIDENTIL">Insidentil (Tugas Ad-Hoc / Sekali Jalan)</option>
+                  <option value="INSIDENTIL">Insidentil (Ad-Hoc / Sekali Jalan)</option>
                 </select>
               </div>
 
-              {periodType === 'INSIDENTIL' ? (
+              {/* 2. Pilihan Triwulan / Semester / Bulan Spesifik */}
+              {periodType === 'TRIWULANAN' && (
                 <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Triwulan Tugas *</label>
+                  <select
+                    value={selectedQuarter}
+                    onChange={(e) => setSelectedQuarter(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                  >
+                    <option value={1}>Triwulan I (Januari - Maret)</option>
+                    <option value={2}>Triwulan II (April - Juni)</option>
+                    <option value={3}>Triwulan III (Juli - September)</option>
+                    <option value={4}>Triwulan IV (Oktober - Desember)</option>
+                  </select>
+                </div>
+              )}
+
+              {periodType === 'SEMESTERAN' && (
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Semester Tugas *</label>
+                  <select
+                    value={selectedSemester}
+                    onChange={(e) => setSelectedSemester(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                  >
+                    <option value={1}>Semester I (Januari - Juni)</option>
+                    <option value={2}>Semester II (Juli - Desember)</option>
+                  </select>
+                </div>
+              )}
+
+              {periodType === 'BULANAN' && (
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Bulan Tugas *</label>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                  >
+                    {monthNames.map((m, idx) => (
+                      <option key={idx + 1} value={idx + 1}>
+                        Bulan {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 3. Pilihan Tahun Anggaran (Untuk semua siklus kecuali Insidentil) */}
+              {periodType !== 'INSIDENTIL' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Tahun Anggaran *</label>
+                  <input
+                    type="number"
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                  />
+                </div>
+              ) : (
+                <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-stone-700 mb-1">Tenggat Waktu Pekerjaan *</label>
                   <input
                     type="date"
@@ -502,23 +554,23 @@ export default function NewTaskPage() {
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-mono font-medium"
                   />
                 </div>
-              ) : (
-                <div className="p-3 bg-white rounded-xl border border-stone-200 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-stone-400 font-semibold block uppercase">Tenggat Periode Berjalan</span>
-                    <span className="text-xs font-mono font-bold text-stone-800">{deadline || '-'}</span>
-                  </div>
-                  <CalendarCheck2 className="w-5 h-5 text-emerald-600" />
-                </div>
               )}
             </div>
 
-            {/* Formula Fleksibel untuk Tugas Rutin */}
+            {/* Panel Hasil Kalkulasi Tenggat & Formula Siklus */}
             {periodType !== 'INSIDENTIL' && (
               <div className="pt-3 border-t border-stone-200/60 space-y-3">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
-                  <Clock className="w-4 h-4 text-[#DF3B68]" />
-                  <span>Formula Batas Waktu Siklus (Fleksibel & Dihitung Otomatis):</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                    <Clock className="w-4 h-4 text-[#DF3B68]" />
+                    <span>Formula Penentuan Batas Waktu ({periodType === 'TRIWULANAN' ? `TW ${['I', 'II', 'III', 'IV'][selectedQuarter - 1]}` : periodType === 'SEMESTERAN' ? `Semester ${selectedSemester}` : `Bulan ${monthNames[selectedMonth - 1]}`} {selectedYear}):</span>
+                  </div>
+
+                  {/* Badge Hasil Deadline Terhitung */}
+                  <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-emerald-800 text-xs font-bold self-start sm:self-auto">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Tenggat: {deadline || '-'}</span>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -531,12 +583,12 @@ export default function NewTaskPage() {
                     >
                       <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
                       <option value="END_OF_PERIOD">Bulan Terakhir Periode Berkenaan</option>
-                      <option value="SAME_MONTH_DATE">Bulan Berjalan / Awal Periode</option>
+                      <option value="SAME_MONTH_DATE">Bulan Pertama / Awal Periode</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal Batas:</label>
+                    <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal:</label>
                     <div className="flex gap-2">
                       <select
                         value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
@@ -578,12 +630,13 @@ export default function NewTaskPage() {
                   </div>
                 </div>
 
-                {/* Simulasi Pratinjau Dinamis */}
-                <div className="p-3 bg-white rounded-xl border border-stone-200/90 text-xs text-stone-700 flex items-start gap-2">
+                <div className="p-3 bg-white rounded-xl border border-stone-200 text-xs text-stone-700 flex items-start gap-2">
                   <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-semibold text-stone-900">Pratinjau Pola Siklus:</p>
-                    <p className="text-[11px] text-stone-600 mt-0.5">{getCyclePreviewSimulation()}</p>
+                    <p className="font-semibold text-stone-900">Penjelasan Tenggat Tugas Ini:</p>
+                    <p className="text-[11px] text-stone-600 mt-0.5">
+                      Tugas ini dialokasikan untuk <strong>{periodType === 'TRIWULANAN' ? `Triwulan ${['I', 'II', 'III', 'IV'][selectedQuarter - 1]}` : periodType === 'SEMESTERAN' ? `Semester ${selectedSemester}` : `Bulan ${monthNames[selectedMonth - 1]}`} {selectedYear}</strong>. Berdasarkan formula, batas akhir penyelesaian dokumen jatuh pada tanggal <strong className="text-stone-900 font-mono">{deadline}</strong>.
+                    </p>
                   </div>
                 </div>
               </div>
