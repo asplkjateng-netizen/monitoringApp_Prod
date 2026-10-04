@@ -19,7 +19,8 @@ import {
   Search,
   UserX,
   UserCheck,
-  Building
+  Building,
+  Link as LinkIcon
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -43,9 +44,15 @@ interface TaskTemplate {
   title: string;
   description: string | null;
   legal_basis: string | null;
+  legal_basis_link?: string | null;
   period_type: 'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL';
   deadline_rule?: string;
   exact_day?: number;
+}
+
+interface SubtaskDraft {
+  title: string;
+  deadline?: string;
 }
 
 export default function NewTaskPage() {
@@ -62,7 +69,6 @@ export default function NewTaskPage() {
   const [userUnitInfo, setUserUnitInfo] = useState<any>(null);
   const [userTusiType, setUserTusiType] = useState<string>('UMUM');
   
-  // Kewenangan Broadcast
   const [canBroadcast, setCanBroadcast] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
@@ -76,6 +82,7 @@ export default function NewTaskPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
+  const [legalBasisLink, setLegalBasisLink] = useState('');
   const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('TRIWULANAN');
   
   // State Pemilih Periode Spesifik
@@ -99,9 +106,9 @@ export default function NewTaskPage() {
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [loadingBroadcastStaff, setLoadingBroadcastStaff] = useState(false);
 
-  // Multi-PIC Manual & Subtasks
+  // Multi-PIC Manual & Subtasks dengan Deadline
   const [selectedPics, setSelectedPics] = useState<string[]>([]);
-  const [subtasks, setSubtasks] = useState<string[]>(['']);
+  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([{ title: '', deadline: '' }]);
 
   useEffect(() => {
     fetchInitialData();
@@ -194,7 +201,6 @@ export default function NewTaskPage() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-
       if (!user) {
         router.push('/login');
         return;
@@ -202,7 +208,6 @@ export default function NewTaskPage() {
 
       setUserId(user.id);
 
-      // 1. Ambil profil user secara aman
       const { data: profile } = await supabase
         .from('profiles')
         .select('*, unit:units(*)')
@@ -210,8 +215,6 @@ export default function NewTaskPage() {
         .maybeSingle();
 
       let targetUnitId = profile?.unit_id;
-
-      // Fallback unit_id jika belum terhubung
       if (!targetUnitId) {
         const { data: firstUnit } = await supabase.from('units').select('id, name, level').limit(1).single();
         if (firstUnit) targetUnitId = firstUnit.id;
@@ -224,11 +227,9 @@ export default function NewTaskPage() {
       setUserTusiType(tusi);
 
       const roleUpper = String(profile?.role || 'STAF').toUpperCase();
-      const adminFlag = roleUpper === 'SUPER_ADMIN';
-      setIsSuperAdmin(adminFlag);
+      setIsSuperAdmin(roleUpper === 'SUPER_ADMIN');
       setCanBroadcast(true);
 
-      // 2. Ambil seluruh pegawai di unit kerja ini untuk PIC Manual
       let loadedStaff: StaffProfile[] = [];
       if (targetUnitId) {
         const { data: staffData } = await supabase
@@ -237,12 +238,9 @@ export default function NewTaskPage() {
           .eq('unit_id', targetUnitId)
           .order('full_name', { ascending: true });
 
-        if (staffData && staffData.length > 0) {
-          loadedStaff = staffData;
-        }
+        if (staffData && staffData.length > 0) loadedStaff = staffData;
       }
 
-      // Pastikan user sendiri SELALU ada di daftar pilihan PIC
       const userAlreadyInList = loadedStaff.some((s) => s.id === user.id);
       if (!userAlreadyInList) {
         loadedStaff.unshift({
@@ -257,7 +255,6 @@ export default function NewTaskPage() {
       setStaffList(loadedStaff);
       setSelectedPics([user.id]);
 
-      // 3. Ambil master tusi
       const { data: tpl } = await supabase
         .from('task_templates')
         .select('*')
@@ -271,7 +268,6 @@ export default function NewTaskPage() {
     }
   };
 
-  // Muat daftar seluruh pegawai untuk penugasan massal
   const loadBroadcastStaff = async (scope: 'SEKSI' | 'KANTOR' | 'WILAYAH') => {
     setLoadingBroadcastStaff(true);
     try {
@@ -328,10 +324,9 @@ export default function NewTaskPage() {
       setTitle(tpl.title);
       setDescription(tpl.description || '');
       setLegalBasis(tpl.legal_basis || '');
+      setLegalBasisLink(tpl.legal_basis_link || '');
       setPeriodType(tpl.period_type);
-      if (tpl.deadline_rule) {
-        setDeadlineRule(tpl.deadline_rule as any);
-      }
+      if (tpl.deadline_rule) setDeadlineRule(tpl.deadline_rule as any);
       if (tpl.exact_day) {
         setExactDay(tpl.exact_day);
         setCustomDayInput(String(tpl.exact_day));
@@ -351,12 +346,23 @@ export default function NewTaskPage() {
     );
   };
 
-  const handleAddSubtask = () => setSubtasks((prev) => [...prev, '']);
+  const handleAddSubtask = () => setSubtasks((prev) => [...prev, { title: '', deadline: '' }]);
   const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
-  const handleSubtaskChange = (index: number, value: string) => {
+  const handleSubtaskTitleChange = (index: number, val: string) => {
     setSubtasks((prev) => {
       const updated = [...prev];
-      updated[index] = value;
+      updated[index] = { ...updated[index], title: val };
+      return updated;
+    });
+  };
+  const handleSubtaskDeadlineChange = (index: number, val: string) => {
+    if (deadline && val && val > deadline) {
+      alert(`Peringatan: Batas waktu tahapan (${val}) tidak boleh melebihi batas waktu tugas utama (${deadline}).`);
+      return;
+    }
+    setSubtasks((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], deadline: val };
       return updated;
     });
   };
@@ -373,12 +379,10 @@ export default function NewTaskPage() {
       return;
     }
 
-    // Jika unitId belum terdeteksi di state, cari unit fallback
     if (!activeUnitId) {
       const { data: fallbackUnit } = await supabase.from('units').select('id').limit(1).single();
-      if (fallbackUnit) {
-        activeUnitId = fallbackUnit.id;
-      } else {
+      if (fallbackUnit) activeUnitId = fallbackUnit.id;
+      else {
         setErrorMessage('Unit kerja belum terdaftar pada sistem.');
         return;
       }
@@ -393,7 +397,14 @@ export default function NewTaskPage() {
       return;
     }
 
-    // Tentukan PIC Final
+    // Validasi deadline subtask tidak boleh > main task deadline
+    for (const st of subtasks) {
+      if (st.deadline && deadline && st.deadline > deadline) {
+        setErrorMessage(`Tenggat tahapan "${st.title}" (${st.deadline}) melampaui batas akhir tugas utama (${deadline}).`);
+        return;
+      }
+    }
+
     let finalPics: string[] = [];
     if (assignmentMode === 'BROADCAST') {
       finalPics = broadcastStaffList
@@ -413,7 +424,7 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // 1. Simpan ke Master Bank Tusi jika dicentang
+      // 1. Simpan Master Tusi jika dicentang
       if (saveAsTemplate && !createdTemplateId) {
         const { data: newTpl } = await supabase
           .from('task_templates')
@@ -422,6 +433,7 @@ export default function NewTaskPage() {
             title: title.trim(),
             description: description.trim() || null,
             legal_basis: legalBasis.trim() || null,
+            legal_basis_link: legalBasisLink.trim() || null,
             period_type: periodType,
             deadline_rule: periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
             exact_day: exactDay,
@@ -431,12 +443,10 @@ export default function NewTaskPage() {
           .select('id')
           .single();
 
-        if (newTpl) {
-          createdTemplateId = newTpl.id;
-        }
+        if (newTpl) createdTemplateId = newTpl.id;
       }
 
-      // 2. Simpan Tugas Riil Operasional
+      // 2. Simpan Tugas Utama
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -445,6 +455,7 @@ export default function NewTaskPage() {
           title: title.trim(),
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
+          legal_basis_link: legalBasisLink.trim() || null,
           period_type: periodType,
           period_month: getPeriodMonthValue(),
           period_year: selectedYear,
@@ -463,7 +474,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan Seluruh PIC (Manual atau Broadcast)
+      // 3. Simpan PIC Pelaksana
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -481,12 +492,13 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks Awal
-      const validSubtasks = subtasks.map((s) => s.trim()).filter((s) => s.length > 0);
+      // 4. Simpan Subtasks Lengkap dengan Deadline Opsional
+      const validSubtasks = subtasks.filter((s) => s.title.trim().length > 0);
       if (validSubtasks.length > 0) {
-        const subtaskPayloads = validSubtasks.map((stTitle) => ({
+        const subtaskPayloads = validSubtasks.map((st) => ({
           task_id: taskId,
-          title: stTitle,
+          title: st.title.trim(),
+          deadline: st.deadline || null,
           is_completed: false,
           evidence_link_type: 'INHERIT',
         }));
@@ -528,7 +540,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas klerikal berkala, penugasan massal satker, atau pekerjaan insidentil.
+            Daftarkan tugas berkala, penugasan massal satker, atau pekerjaan insidentil.
           </p>
         </div>
       </div>
@@ -541,7 +553,7 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Master Bank Tusi Selector */}
+        {/* Template Selector */}
         <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
             <Sparkles className="w-4 h-4 text-[#DF3B68]" />
@@ -561,7 +573,7 @@ export default function NewTaskPage() {
           </select>
         </div>
 
-        {/* Rincian Informasi Tugas */}
+        {/* Rincian Tugas Pokok */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -572,7 +584,7 @@ export default function NewTaskPage() {
             <div className="flex flex-wrap items-center gap-2">
               {periodType !== 'INSIDENTIL' && (
                 <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
-                  Otomasi Pembangkitan Rutin Aktif
+                  Otomasi Rutin Aktif
                 </span>
               )}
 
@@ -605,15 +617,32 @@ export default function NewTaskPage() {
               required
             />
 
-            <div className="space-y-1 text-left">
-              <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Regulasi</label>
-              <input
-                type="text"
-                placeholder="Contoh: PER-5/PB/2024, ND Dit. APK"
-                value={legalBasis}
-                onChange={(e) => setLegalBasis(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
-              />
+            {/* Input Dasar Hukum & Tautan Regulasi */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1 text-left">
+                <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Nomor Regulasi</label>
+                <input
+                  type="text"
+                  placeholder="Contoh: PER-5/PB/2024, ND Dit. APK"
+                  value={legalBasis}
+                  onChange={(e) => setLegalBasis(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                />
+              </div>
+
+              <div className="space-y-1 text-left">
+                <label className="block text-xs font-semibold text-stone-600">Tautan Link Regulasi (JDIH / Cloud)</label>
+                <div className="relative">
+                  <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="url"
+                    placeholder="https://jdih.kemenkeu.go.id/..."
+                    value={legalBasisLink}
+                    onChange={(e) => setLegalBasisLink(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 font-mono"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="space-y-1 text-left">
@@ -628,7 +657,7 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus & Formula */}
+          {/* Konfigurasi Siklus */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
@@ -636,7 +665,7 @@ export default function NewTaskPage() {
                 <select
                   value={periodType}
                   onChange={(e) => setPeriodType(e.target.value as any)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800 focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
                 >
                   <option value="TRIWULANAN">Triwulanan (TW I s.d. TW IV)</option>
                   <option value="BULANAN">Bulanan (Klerikal Rutin)</option>
@@ -826,7 +855,6 @@ export default function NewTaskPage() {
               <span>Tetapkan PIC Pelaksana</span>
             </div>
 
-            {/* SWITCHER KHUSUS ADMIN & PIC */}
             <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
               <button
                 type="button"
@@ -854,7 +882,7 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* OPSI 1: PENUGASAN MANUAL */}
+          {/* OPSI 1: MANUAL */}
           {assignmentMode === 'MANUAL' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500">
@@ -889,7 +917,7 @@ export default function NewTaskPage() {
             </div>
           )}
 
-          {/* OPSI 2: BROADCAST MASSAL */}
+          {/* OPSI 2: BROADCAST */}
           {assignmentMode === 'BROADCAST' && (
             <div className="space-y-4 bg-stone-50/70 p-4 sm:p-5 rounded-2xl border border-stone-200">
               <div className="space-y-2">
@@ -942,12 +970,11 @@ export default function NewTaskPage() {
                 </div>
               </div>
 
-              {/* Status Ringkasan Broadcast */}
               <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-stone-200 text-xs">
                 <div className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4 text-emerald-600" />
                   <span>
-                    Penerima Tugas: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
+                    Penerima: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -958,12 +985,12 @@ export default function NewTaskPage() {
                 </div>
               </div>
 
-              {/* Daftar Pengecualian Pegawai */}
+              {/* Exclusion List */}
               <div className="space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
                     <UserX className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Daftar Pengecualian Pegawai (Centang untuk mengecualikan):</span>
+                    <span>Daftar Pengecualian Pegawai:</span>
                   </p>
                   
                   <div className="relative w-full sm:w-64">
@@ -1028,12 +1055,17 @@ export default function NewTaskPage() {
           )}
         </div>
 
-        {/* Sub-Pekerjaan Awal */}
+        {/* SUBTASKS DENGAN PENGATURAN DEADLINE OPSIONAL */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-            <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
-              <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
-              <span>Tahapan Sub-Pekerjaan Awal (Opsional)</span>
+            <div>
+              <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+                <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
+                <span>Tahapan Sub-Pekerjaan Awal & Batas Waktu (Opsional)</span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-0.5">
+                Batas waktu sub-tugas bersifat opsional dan tidak boleh melampaui tenggat tugas utama ({deadline || 'belum ditentukan'}).
+              </p>
             </div>
             <button
               type="button"
@@ -1046,24 +1078,35 @@ export default function NewTaskPage() {
 
           <div className="space-y-2.5">
             {subtasks.map((st, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-stone-400 w-5 text-right">{idx + 1}.</span>
+              <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 bg-stone-50/70 rounded-2xl border border-stone-200">
+                <span className="text-xs font-semibold text-stone-400 w-5 text-left">{idx + 1}.</span>
                 <input
                   type="text"
-                  placeholder={`Uraian sub-tahapan ke-${idx + 1}`}
-                  value={st}
-                  onChange={(e) => handleSubtaskChange(idx, e.target.value)}
+                  placeholder={`Uraian sub-tahapan ke-${idx + 1}...`}
+                  value={st.title}
+                  onChange={(e) => handleSubtaskTitleChange(idx, e.target.value)}
                   className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
-                {subtasks.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSubtask(idx)}
-                    className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-stone-500 whitespace-nowrap">Batas:</span>
+                  <input
+                    type="date"
+                    max={deadline || undefined}
+                    value={st.deadline || ''}
+                    onChange={(e) => handleSubtaskDeadlineChange(idx, e.target.value)}
+                    className="px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                    title="Tenggat sub-tugas (opsional, tidak boleh melampaui batas tugas utama)"
+                  />
+                  {subtasks.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSubtask(idx)}
+                      className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
