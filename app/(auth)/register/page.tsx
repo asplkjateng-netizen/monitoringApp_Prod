@@ -13,7 +13,8 @@ import {
   ArrowRight,
   ShieldCheck,
   Clock,
-  LogIn
+  LogIn,
+  Phone
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,8 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
   const [nip, setNip] = useState('');
   const [employmentStatus, setEmploymentStatus] = useState('PNS');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [waNotifyCritical, setWaNotifyCritical] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -67,10 +70,23 @@ export default function RegisterPage() {
 
   // Ambil nama unit penempatan yang dipilih untuk teks konfirmasi
   const getSelectedUnitName = () => {
+    if (selectedSeksi.startsWith('HEAD_ES3:')) {
+      const u = units.find((x) => x.id === selectedEselon3);
+      return u ? `${u.name} (Tingkat Pimpinan / Seluruh Seksi)` : 'Pimpinan Kantor';
+    }
+    if (selectedEselon3.startsWith('HEAD_ES2:')) {
+      const u = units.find((x) => x.id === selectedEselon2);
+      return u ? `${u.name} (Tingkat Pimpinan Wilayah)` : 'Pimpinan Wilayah';
+    }
+
     const targetId = selectedSeksi || selectedEselon3 || selectedEselon2;
     const found = units.find((u) => u.id === targetId);
     return found ? found.name : 'Unit Terpilih';
   };
+
+  const isHeadOfOffice = 
+    selectedEselon3.startsWith('HEAD_ES2:') || 
+    selectedSeksi.startsWith('HEAD_ES3:');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,10 +108,35 @@ export default function RegisterPage() {
       return;
     }
 
-    const finalUnitId = selectedSeksi || selectedEselon3 || selectedEselon2;
+    // Tentukan finalUnitId berdasarkan pilihan pimpinan atau seksi
+    let finalUnitId = '';
+    let isHead = false;
+
+    if (selectedEselon3.startsWith('HEAD_ES2:')) {
+      finalUnitId = selectedEselon2;
+      isHead = true;
+    } else if (selectedSeksi.startsWith('HEAD_ES3:')) {
+      finalUnitId = selectedEselon3;
+      isHead = true;
+    } else {
+      finalUnitId = selectedSeksi || selectedEselon3 || selectedEselon2;
+    }
+
     if (!finalUnitId) {
       setErrorMsg('Silakan tentukan unit penempatan kerja Anda.');
       return;
+    }
+
+    // Sanitasi format nomor WhatsApp Indonesia
+    let cleanPhone = phoneNumber.replace(/[^0-9]/g, '');
+    if (cleanPhone) {
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '62' + cleanPhone.slice(1);
+      }
+      if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+        setErrorMsg('Nomor WhatsApp tidak valid (minimal 10 digit, contoh: 08123456789).');
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -123,9 +164,8 @@ export default function RegisterPage() {
         return;
       }
 
-      // Deteksi jika user sudah ada di Supabase Auth (mencegah error profiles_id_fkey)
       if (authData.user && authData.user.identities && authData.user.identities.length === 0) {
-        setErrorMsg('Email ini sudah pernah terdaftar di autentikasi Supabase. Silakan minta Super Admin menghapus akun lama Anda di menu Authentication -> Users atau gunakan fitur Reset Password.');
+        setErrorMsg('Email ini sudah pernah terdaftar di autentikasi Supabase. Silakan gunakan fitur Reset Password atau hubungi Admin.');
         setIsLoading(false);
         return;
       }
@@ -136,7 +176,7 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2. Simpan profil dinas ke tabel profiles
+      // 2. Simpan profil dinas ke tabel profiles (termasuk nomor WA & preferensi notif)
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
@@ -144,9 +184,11 @@ export default function RegisterPage() {
           full_name: fullName.trim(),
           nip: nip.trim(),
           employment_status: employmentStatus as any,
-          role: 'STAF',
-          is_unit_admin: false,
+          role: isHead ? 'KEPALA_UNIT' : 'STAF',
+          is_unit_admin: isHead,
           unit_id: finalUnitId,
+          phone_number: cleanPhone || null,
+          wa_notify_critical: waNotifyCritical,
           approval_status: 'PENDING',
         });
 
@@ -156,7 +198,6 @@ export default function RegisterPage() {
         return;
       }
 
-      // Berhasil: Aktifkan layar pemberitahuan langkah-langkah
       setIsSuccess(true);
     } catch (err: any) {
       setErrorMsg(err.message || 'Terjadi kesalahan sistem saat mendaftar.');
@@ -169,9 +210,7 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-[#F9F6F0] flex items-center justify-center p-4 py-12">
       <div className="bg-white max-w-lg w-full rounded-3xl p-6 md:p-8 border border-stone-200/80 shadow-xl space-y-6">
         
-        {/* ========================================================================= */}
-        {/* TAMPILAN 1: SETELAH BERHASIL MENDAFTAR (PEMBERITAHUAN LANGKAH-LANGKAH)   */}
-        {/* ========================================================================= */}
+        {/* TAMPILAN 1: SETELAH BERHASIL MENDAFTAR */}
         {isSuccess ? (
           <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
             <div className="text-center space-y-2">
@@ -184,14 +223,12 @@ export default function RegisterPage() {
               </p>
             </div>
 
-            {/* Kotak Panduan 3 Langkah Selanjutnya */}
             <div className="bg-stone-50/80 rounded-2xl p-5 border border-stone-200/70 space-y-4">
               <p className="text-[11px] font-bold text-stone-700 uppercase tracking-wider flex items-center gap-1.5 border-b border-stone-200/60 pb-2">
                 <Clock className="w-3.5 h-3.5 text-[#DF3B68]" />
                 <span>3 Langkah Selanjutnya yang Wajib Dilakukan:</span>
               </p>
 
-              {/* Langkah 1 */}
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-[#DF3B68] text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-xs">
                   1
@@ -199,12 +236,11 @@ export default function RegisterPage() {
                 <div className="space-y-0.5">
                   <h4 className="text-xs font-bold text-stone-900">Konfirmasi Email Dinas</h4>
                   <p className="text-[11px] text-stone-500 leading-relaxed">
-                    Periksa kotak masuk (atau spam) email <strong>{email}</strong>. Klik tautan verifikasi yang dikirimkan oleh sistem untuk mengaktifkan akun.
+                    Periksa kotak masuk (atau spam) email <strong>{email}</strong>. Pastikan email Anda telah aktif.
                   </p>
                 </div>
               </div>
 
-              {/* Langkah 2 */}
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-xs">
                   2
@@ -212,12 +248,11 @@ export default function RegisterPage() {
                 <div className="space-y-0.5">
                   <h4 className="text-xs font-bold text-stone-900">Verifikasi & Persetujuan Atasan</h4>
                   <p className="text-[11px] text-stone-500 leading-relaxed">
-                    Kepala Seksi atau Admin Unit di <strong>{getSelectedUnitName()}</strong> akan memverifikasi penempatan kerja Anda melalui menu verifikasi pegawai.
+                    Atasan/Admin Unit di <strong>{getSelectedUnitName()}</strong> akan memverifikasi permohonan akun Anda.
                   </p>
                 </div>
               </div>
 
-              {/* Langkah 3 */}
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-xs">
                   3
@@ -225,13 +260,12 @@ export default function RegisterPage() {
                 <div className="space-y-0.5">
                   <h4 className="text-xs font-bold text-stone-900">Mulai Mengakses Aplikasi</h4>
                   <p className="text-[11px] text-stone-500 leading-relaxed">
-                    Setelah akun berstatus disetujui (*APPROVED*), Anda dapat masuk ke dasbor dan mengelola pemantauan tugas dinas.
+                    Setelah akun berstatus *APPROVED*, Anda dapat masuk ke dasbor dan mengelola pemantauan tugas dinas.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Tombol Aksi */}
             <div className="space-y-2 pt-1">
               <Link
                 href="/login"
@@ -248,9 +282,7 @@ export default function RegisterPage() {
             </div>
           </div>
         ) : (
-          /* ========================================================================= */
-          /* TAMPILAN 2: FORMULIR PENDAFTARAN PEGAWAI                                   */
-          /* ========================================================================= */
+          /* TAMPILAN 2: FORMULIR PENDAFTARAN PEGAWAI */
           <>
             <div className="text-center space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-[#DF3B68] bg-rose-50 px-3 py-1 rounded-full border border-rose-100">
@@ -338,6 +370,10 @@ export default function RegisterPage() {
                       className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                     >
                       <option value="">-- Pilih Unit Eselon III --</option>
+                      {/* OPSI KHUSUS KAKANWIL */}
+                      <option value={`HEAD_ES2:${selectedEselon2}`} className="font-bold text-[#DF3B68]">
+                        ⭐ [Semua Bidang & KPPN / Pimpinan Kanwil (Kakanwil)]
+                      </option>
                       {eselon3List.map((u) => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
@@ -345,21 +381,55 @@ export default function RegisterPage() {
                   </div>
                 )}
 
-                {selectedEselon3 && seksiList.length > 0 && (
+                {selectedEselon3 && !selectedEselon3.startsWith('HEAD_ES2:') && (
                   <div className="space-y-1 text-left">
                     <label className="block text-xs font-semibold text-stone-600">Seksi / Subbagian Kerja</label>
                     <select
                       value={selectedSeksi}
                       onChange={(e) => setSelectedSeksi(e.target.value)}
+                      required
                       className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                     >
-                      <option value="">-- Pilih Seksi / Subbagian (Opsional jika Kasi/Kakantor) --</option>
+                      <option value="">-- Pilih Seksi Pelaksana --</option>
+                      {/* OPSI KHUSUS KEPALA KPPN / KEPALA BIDANG */}
+                      <option value={`HEAD_ES3:${selectedEselon3}`} className="font-bold text-[#DF3B68]">
+                        ⭐ [Semua Seksi / Pimpinan Kantor (Kepala KPPN / Kabid)]
+                      </option>
                       {seksiList.map((u) => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
                     </select>
                   </div>
                 )}
+
+                {isHeadOfOffice && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-[#DF3B68] shrink-0" />
+                    <span>Anda mendaftar pada <strong>Tingkat Pimpinan Unit</strong> (memiliki wewenang pemantauan seluruh seksi/bidang).</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Data Kontak WhatsApp & Preferensi Pengingat */}
+              <div className="space-y-3 pt-2 border-t border-stone-100">
+                <Input
+                  label="Nomor WhatsApp Aktif (Opsional)"
+                  placeholder="Contoh: 08123456789 atau 628123456789"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                />
+                
+                <label className="flex items-start gap-2.5 cursor-pointer pt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={waNotifyCritical}
+                    onChange={(e) => setWaNotifyCritical(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 text-[#DF3B68] rounded border-stone-300 focus:ring-[#DF3B68]"
+                  />
+                  <span className="text-xs text-stone-600 select-none">
+                    Kirimkan notifikasi pengingat tugas kritis (hampir jatuh tempo) via WhatsApp.
+                  </span>
+                </label>
               </div>
 
               {/* Data Akun & Sandi */}
