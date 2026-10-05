@@ -10,12 +10,12 @@ import {
   LogOut, 
   CalendarDays, 
   Check, 
-  HelpCircle,
-  X,
-  ChevronRight,
-  Sparkles,
-  LayoutDashboard,
-  ListTodo,
+  HelpCircle, 
+  X, 
+  ChevronRight, 
+  Sparkles, 
+  LayoutDashboard, 
+  ListTodo, 
   Bell
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -34,42 +34,89 @@ const PERIOD_OPTIONS = [
   { id: 'TAHUNAN', label: 'Tahunan', desc: 'Sepanjang tahun' },
 ];
 
-// DATA ONBOARDING TUTORIAL TOUR
+// DATA ONBOARDING SPOTLIGHT TOUR
 const TOUR_STEPS = [
   {
+    id: 'welcome',
+    targetId: null, // Berada di tengah layar
     title: 'Selamat Datang di Gov-Task-Monitor! 👋',
-    description: 'Portal pemantauan tusi, kepatuhan, dan pekerjaan instansi vertikal berjenjang. Mari luangkan 1 menit untuk mengenal fitur utama aplikasi.',
+    description: 'Portal pemantauan tusi, kepatuhan, dan pekerjaan instansi vertikal berjenjang. Mari luangkan 1 menit untuk mengenal alur navigasi aplikasi.',
     icon: Sparkles,
     badge: 'Pengenalan',
   },
   {
-    title: '1. Pemilih Periode Fleksibel 📅',
-    description: 'Di bagian pojok kanan atas, Anda dapat memilih siklus periode (Bulanan, Triwulanan TW I–IV, Semesteran, atau Tahunan). Semua metrik dashboard dan filter tugas otomatis menyesuaikan.',
-    icon: Bell,
+    id: 'period',
+    targetId: 'tour-period-dropdown', // Menunjuk tombol periode
+    title: '1. Pemilih Siklus Periode 📅',
+    description: 'Pilih siklus pemantauan (Bulan Berjalan, Triwulan I–IV, Semester, atau Tahunan). Seluruh kartu metrik dasbor dan filter daftar tugas akan langsung menyesuaikan.',
+    icon: CalendarDays,
     badge: 'Filter Periode',
   },
   {
+    id: 'tasks',
+    targetId: 'tour-sidebar-tasks', // Menunjuk menu Daftar Tugas di Sidebar
     title: '2. Daftar Tugas & Sub-Pekerjaan 📋',
-    description: 'Buka menu "Daftar Tugas" untuk mengelola pekerjaan. Anda dapat membuka/tutup uraian deskripsi, melihat link regulasi dasar hukum, checklist tahapan sub-pekerjaan, serta akses instan tautan bukti dokumen.',
+    description: 'Akses menu ini untuk memantau progres tugas, melihat dasar hukum & petunjuk teknis, mengisi checklist sub-tugas, serta membuka tautan dokumen bukti.',
     icon: ListTodo,
-    badge: 'Manajemen Pekerjaan',
+    badge: 'Manajemen Tugas',
   },
   {
-    title: '3. Dashboard Berjenjang 4 Perspektif 📊',
-    description: 'Dashboard beradaptasi otomatis sesuai peran Anda: dari Staf pelaksana, Kepala Seksi (beban kerja staf), Kepala Unit (matriks kesehatan KPPN), hingga Kepala Kanwil (peringkat wilayah).',
+    id: 'dashboard',
+    targetId: 'tour-sidebar-dashboard', // Menunjuk menu Dashboard di Sidebar
+    title: '3. Dashboard Multi-Perspektif 📊',
+    description: 'Tampilan dasbor beradaptasi sesuai level peran: Staf (tugas pribadi), Kasi (beban kerja), Kakantor (kepatuhan unit), hingga Kakanwil (radar regional).',
     icon: LayoutDashboard,
     badge: 'Monitoring Realtime',
   },
 ];
 
-function TutorialTourModal() {
+// KOMPONEN GELEMBUNG TUTORIAL SPOTLIGHT MELAYANG
+function InteractiveSpotlightTour() {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [coords, setCoords] = useState<{ top: number; left: number; position: 'center' | 'anchored' }>({
+    top: 0,
+    left: 0,
+    position: 'center',
+  });
+
+  const step = TOUR_STEPS[currentStep];
+
+  const updatePosition = () => {
+    if (!step.targetId) {
+      setCoords({ top: 0, left: 0, position: 'center' });
+      return;
+    }
+
+    const el = document.getElementById(step.targetId);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const isSidebar = step.targetId.includes('sidebar');
+
+      if (isSidebar) {
+        // Posisikan gelembung di sebelah kanan menu sidebar
+        setCoords({
+          top: Math.max(20, rect.top - 10),
+          left: rect.right + 18,
+          position: 'anchored',
+        });
+      } else {
+        // Posisikan gelembung di bawah tombol periode (kanan atas)
+        setCoords({
+          top: rect.bottom + 14,
+          left: Math.max(16, rect.right - 340),
+          position: 'anchored',
+        });
+      }
+    } else {
+      setCoords({ top: 0, left: 0, position: 'center' });
+    }
+  };
 
   useEffect(() => {
     const hasSeenTour = localStorage.getItem('gov_task_tour_completed');
     if (!hasSeenTour) {
-      const timer = setTimeout(() => setIsOpen(true), 1000);
+      const timer = setTimeout(() => setIsOpen(true), 800);
       return () => clearTimeout(timer);
     }
 
@@ -81,6 +128,18 @@ function TutorialTourModal() {
     window.addEventListener('open-app-tour', handleOpenTour);
     return () => window.removeEventListener('open-app-tour', handleOpenTour);
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('resize', updatePosition);
+      window.addEventListener('scroll', updatePosition);
+      return () => {
+        window.removeEventListener('resize', updatePosition);
+        window.removeEventListener('scroll', updatePosition);
+      };
+    }
+  }, [isOpen, currentStep]);
 
   const handleClose = () => {
     localStorage.setItem('gov_task_tour_completed', 'true');
@@ -103,36 +162,53 @@ function TutorialTourModal() {
 
   if (!isOpen) return null;
 
-  const step = TOUR_STEPS[currentStep];
   const StepIcon = step.icon;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white max-w-md w-full rounded-3xl p-6 shadow-2xl border border-stone-200/80 relative space-y-4">
+    <div className="fixed inset-0 z-50 pointer-events-auto">
+      {/* Backdrop semi transparan */}
+      <div 
+        onClick={handleClose}
+        className="fixed inset-0 bg-black/40 backdrop-blur-2xs transition-opacity animate-in fade-in duration-200"
+      />
+
+      {/* Gelembung Panduan */}
+      <div
+        style={
+          coords.position === 'anchored'
+            ? { top: `${coords.top}px`, left: `${coords.left}px` }
+            : {}
+        }
+        className={`fixed z-50 w-84 sm:w-96 bg-white rounded-3xl p-5 shadow-2xl border border-stone-200/90 space-y-4 animate-in fade-in zoom-in-95 duration-200 ${
+          coords.position === 'center'
+            ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+            : ''
+        }`}
+      >
         <button
           onClick={handleClose}
-          className="absolute right-4 top-4 p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-full transition-colors"
+          className="absolute right-3.5 top-3.5 p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-full transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
 
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#DF3B68]/10 text-[#DF3B68] flex items-center justify-center border border-[#DF3B68]/20">
+          <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#DF3B68] flex items-center justify-center border border-rose-100 shrink-0">
             <StepIcon className="w-5 h-5" />
           </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#DF3B68] bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-100">
+          <div className="pr-6">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#DF3B68] bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
               {step.badge} ({currentStep + 1}/{TOUR_STEPS.length})
             </span>
-            <h3 className="font-bold text-stone-900 text-sm mt-1">{step.title}</h3>
+            <h3 className="font-bold text-stone-900 text-sm mt-1 leading-snug">{step.title}</h3>
           </div>
         </div>
 
-        <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3.5 rounded-2xl border border-stone-200/60">
+        <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-3 rounded-2xl border border-stone-200/70">
           {step.description}
         </p>
 
-        <div className="flex items-center justify-between pt-2 border-t border-stone-100">
+        <div className="flex items-center justify-between pt-1 border-t border-stone-100">
           <div className="flex items-center gap-1.5">
             {TOUR_STEPS.map((_, idx) => (
               <div
@@ -158,7 +234,7 @@ function TutorialTourModal() {
             <button
               type="button"
               onClick={handleNext}
-              className="px-4 py-1.5 rounded-xl bg-[#DF3B68] hover:bg-[#C72F58] text-white text-xs font-semibold flex items-center gap-1 shadow-sm"
+              className="px-4 py-1.5 rounded-xl bg-[#DF3B68] hover:bg-[#C72F58] text-white text-xs font-semibold flex items-center gap-1 shadow-sm transition-colors"
             >
               <span>{currentStep === TOUR_STEPS.length - 1 ? 'Mulai Eksplorasi' : 'Lanjut'}</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -170,6 +246,7 @@ function TutorialTourModal() {
   );
 }
 
+// KONTEN UTAMA TOPBAR
 function TopBarContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -191,7 +268,6 @@ function TopBarContent() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Defensive fetch: ambil data profiles tanpa ketergantungan relasi schema PostgREST
       const { data: profData } = await supabase
         .from('profiles')
         .select('id, full_name, nip, role, is_unit_admin, unit_id, approval_status')
@@ -256,9 +332,9 @@ function TopBarContent() {
 
   return (
     <>
-      <TutorialTourModal />
+      <InteractiveSpotlightTour />
       <header className="h-20 bg-canvas px-6 md:px-8 flex items-center justify-between border-b border-stone-200/40 sticky top-0 z-30">
-        {/* Kiri: Info Unit Kerja Aktif */}
+        {/* Kiri: Indikator Unit Kerja Aktif */}
         <div className="flex items-center gap-3">
           <div className="inline-flex items-center gap-2 bg-white border border-stone-200/80 px-3.5 py-1.5 rounded-full shadow-sm text-xs text-stone-700">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -269,20 +345,22 @@ function TopBarContent() {
           </div>
         </div>
 
-        {/* Kanan: Dropdown Periode + Tombol Panduan + Notifikasi + Profil */}
+        {/* Kanan: Dropdown Periode + Panduan + Notifikasi + Profil */}
         <div className="flex items-center gap-3">
+          {/* Tombol Panduan Interaktif (?) */}
           <button
             type="button"
             onClick={triggerTour}
             className="flex items-center justify-center w-8 h-8 rounded-full bg-white border border-stone-200 text-stone-600 hover:text-[#DF3B68] hover:border-[#DF3B68]/30 hover:bg-rose-50/50 transition-colors shadow-xs"
-            title="Buka Panduan Tutorial Sistem"
+            title="Buka Panduan Tutorial Interaktif"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
 
-          {/* Dropdown Periode */}
+          {/* Dropdown Periode (Target Tour 1) */}
           <div className="relative" ref={periodRef}>
             <button
+              id="tour-period-dropdown"
               type="button"
               onClick={() => setIsPeriodOpen((prev) => !prev)}
               className="flex items-center gap-2 bg-white border border-stone-200/80 px-3.5 py-2 rounded-full text-xs text-stone-700 shadow-sm hover:bg-stone-50 hover:border-stone-300 transition-all focus:outline-none"
@@ -293,7 +371,7 @@ function TopBarContent() {
             </button>
 
             {isPeriodOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-3xl shadow-xl border border-stone-200/80 p-2 z-50">
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-3xl shadow-xl border border-stone-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
                 <div className="px-3 py-2 border-b border-stone-100">
                   <p className="text-[11px] font-bold text-stone-800 uppercase tracking-wider">Pilih Siklus Periode</p>
                 </div>
@@ -322,6 +400,7 @@ function TopBarContent() {
             )}
           </div>
 
+          {/* Lonceng Notifikasi Cerdas */}
           {profile?.id && <NotificationBell userId={profile.id} />}
 
           {/* Profil Avatar & Menu Akun */}
@@ -339,7 +418,7 @@ function TopBarContent() {
             </button>
 
             {isDropdownOpen && (
-              <div className="absolute right-0 mt-2.5 w-60 bg-white rounded-3xl shadow-xl border border-stone-200/80 p-2 z-50">
+              <div className="absolute right-0 mt-2.5 w-60 bg-white rounded-3xl shadow-xl border border-stone-200/80 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
                 <div className="px-4 py-3 border-b border-stone-100">
                   <p className="text-xs font-bold text-stone-900 truncate">{profile?.full_name || 'Pegawai'}</p>
                   <p className="text-[10px] text-stone-400 font-mono truncate mt-0.5">NIP. {profile?.nip || '-'}</p>
