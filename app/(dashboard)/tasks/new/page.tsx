@@ -20,7 +20,9 @@ import {
   UserX,
   UserCheck,
   Building,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Tag,
+  BellRing
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -42,12 +44,14 @@ interface StaffProfile {
 interface TaskTemplate {
   id: string;
   title: string;
+  category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   description: string | null;
   legal_basis: string | null;
   legal_basis_link?: string | null;
   period_type: 'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL';
   deadline_rule?: string;
   exact_day?: number;
+  critical_days_threshold?: number;
 }
 
 interface SubtaskDraft {
@@ -79,6 +83,7 @@ export default function NewTaskPage() {
   // State Form Pokok
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(true);
+  const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
@@ -91,11 +96,15 @@ export default function NewTaskPage() {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
-  // Aturan Siklus Fleksibel
+  // Fleksibilitas Deadline Lintas Bulan
+  const [deadlineMode, setDeadlineMode] = useState<'FORMULA' | 'CUSTOM'>('FORMULA');
   const [deadlineRule, setDeadlineRule] = useState<'END_OF_PERIOD' | 'NEXT_MONTH_DATE' | 'SAME_MONTH_DATE'>('NEXT_MONTH_DATE');
   const [exactDay, setExactDay] = useState<number>(15);
   const [customDayInput, setCustomDayInput] = useState<string>('15');
   const [deadline, setDeadline] = useState('');
+
+  // Pengaturan Masa Kritis Kustom (H-X)
+  const [criticalDaysThreshold, setCriticalDaysThreshold] = useState<number>(3);
   const [priority, setPriority] = useState<'TINGGI' | 'SEDANG' | 'RENDAH'>('SEDANG');
 
   // MODE PENUGASAN (MANUAL vs BROADCAST)
@@ -106,7 +115,7 @@ export default function NewTaskPage() {
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [loadingBroadcastStaff, setLoadingBroadcastStaff] = useState(false);
 
-  // Multi-PIC Manual & Subtasks dengan Deadline
+  // Multi-PIC Manual & Subtasks
   const [selectedPics, setSelectedPics] = useState<string[]>([]);
   const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([{ title: '', deadline: '' }]);
 
@@ -115,10 +124,10 @@ export default function NewTaskPage() {
   }, []);
 
   useEffect(() => {
-    if (periodType !== 'INSIDENTIL') {
+    if (periodType !== 'INSIDENTIL' && deadlineMode === 'FORMULA') {
       calculateRecurringDeadline();
     }
-  }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay]);
+  }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay, deadlineMode]);
 
   useEffect(() => {
     if (assignmentMode === 'BROADCAST') {
@@ -260,7 +269,7 @@ export default function NewTaskPage() {
         .select('*')
         .order('title', { ascending: true });
 
-      if (tpl) setTemplates(tpl);
+      if (tpl) setTemplates(tpl as TaskTemplate[]);
     } catch (err: any) {
       console.error('Error initializing form:', err);
     } finally {
@@ -322,10 +331,12 @@ export default function NewTaskPage() {
     const tpl = templates.find((t) => t.id === templateId);
     if (tpl) {
       setTitle(tpl.title);
+      if (tpl.category) setCategory(tpl.category);
       setDescription(tpl.description || '');
       setLegalBasis(tpl.legal_basis || '');
       setLegalBasisLink(tpl.legal_basis_link || '');
       setPeriodType(tpl.period_type);
+      if (tpl.critical_days_threshold) setCriticalDaysThreshold(tpl.critical_days_threshold);
       if (tpl.deadline_rule) setDeadlineRule(tpl.deadline_rule as any);
       if (tpl.exact_day) {
         setExactDay(tpl.exact_day);
@@ -397,7 +408,6 @@ export default function NewTaskPage() {
       return;
     }
 
-    // Validasi deadline subtask tidak boleh > main task deadline
     for (const st of subtasks) {
       if (st.deadline && deadline && st.deadline > deadline) {
         setErrorMessage(`Tenggat tahapan "${st.title}" (${st.deadline}) melampaui batas akhir tugas utama (${deadline}).`);
@@ -431,12 +441,14 @@ export default function NewTaskPage() {
           .insert({
             tusi_type: userTusiType,
             title: title.trim(),
+            category,
             description: description.trim() || null,
             legal_basis: legalBasis.trim() || null,
             legal_basis_link: legalBasisLink.trim() || null,
             period_type: periodType,
-            deadline_rule: periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
+            deadline_rule: deadlineMode === 'CUSTOM' || periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
             exact_day: exactDay,
+            critical_days_threshold: Number(criticalDaysThreshold) || 3,
             is_recurring: periodType !== 'INSIDENTIL',
             created_by_unit: activeUnitId
           })
@@ -453,6 +465,7 @@ export default function NewTaskPage() {
           unit_id: activeUnitId,
           template_id: createdTemplateId,
           title: title.trim(),
+          category,
           description: description.trim() || null,
           legal_basis: legalBasis.trim() || null,
           legal_basis_link: legalBasisLink.trim() || null,
@@ -460,6 +473,7 @@ export default function NewTaskPage() {
           period_month: getPeriodMonthValue(),
           period_year: selectedYear,
           deadline,
+          critical_days_threshold: Number(criticalDaysThreshold) || 3,
           priority,
           status: 'BELUM_DIKERJAKAN',
           progress_pct: 0,
@@ -492,7 +506,7 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks Lengkap dengan Deadline Opsional
+      // 4. Simpan Subtasks
       const validSubtasks = subtasks.filter((s) => s.title.trim().length > 0);
       if (validSubtasks.length > 0) {
         const subtaskPayloads = validSubtasks.map((st) => ({
@@ -540,7 +554,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas berkala, penugasan massal satker, atau pekerjaan insidentil.
+            Daftarkan tugas tusi, tugas tambahan, improvisasi inovatif, atau penugasan massal satker.
           </p>
         </div>
       </div>
@@ -567,7 +581,7 @@ export default function NewTaskPage() {
             <option value="">-- Buat Tugas Mandiri Baru --</option>
             {templates.map((tpl) => (
               <option key={tpl.id} value={tpl.id}>
-                {tpl.title} ({tpl.period_type})
+                {tpl.title} ({tpl.category || 'TUSI'} - {tpl.period_type})
               </option>
             ))}
           </select>
@@ -582,12 +596,6 @@ export default function NewTaskPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {periodType !== 'INSIDENTIL' && (
-                <span className="text-[11px] font-semibold text-[#DF3B68] bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
-                  Otomasi Rutin Aktif
-                </span>
-              )}
-
               {!selectedTemplateId ? (
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl transition-colors select-none">
                   <input
@@ -609,6 +617,37 @@ export default function NewTaskPage() {
           </div>
 
           <div className="space-y-4">
+            {/* 1. Klasifikasi Jenis Pekerjaan (Tusi / Tambahan / Improvisasi) */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Pilih Jenis Pekerjaan *</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {[
+                  { id: 'TUSI', label: 'Tusi Pokok', desc: 'Sesuai regulasi & tusi unit' },
+                  { id: 'TAMBAHAN', label: 'Tugas Tambahan', desc: 'Penugasan khusus / Pokja' },
+                  { id: 'IMPROVISASI', label: 'Improvisasi', desc: 'Inovasi mandiri penunjang kerja' },
+                ].map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => setCategory(item.id as any)}
+                    className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                      category === item.id
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-stone-900 font-bold'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>{item.label}</span>
+                      <div className={`w-3.5 h-3.5 rounded-full border ${category === item.id ? 'border-[#DF3B68] bg-[#DF3B68]' : 'border-stone-300'}`} />
+                    </div>
+                    <p className="text-[10px] text-stone-400 font-normal mt-0.5">{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <Input
               label="Judul / Uraian Tugas *"
               placeholder="Contoh: Rekonsiliasi Laporan Keuangan UAKPA"
@@ -657,7 +696,7 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus */}
+          {/* Konfigurasi Siklus & Tenggat Fleksibel */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
@@ -746,103 +785,188 @@ export default function NewTaskPage() {
               )}
             </div>
 
+            {/* Pilihan Fleksibilitas Tenggat Lintas Bulan */}
             {periodType !== 'INSIDENTIL' && (
               <div className="pt-3 border-t border-stone-200/60 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                  <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-[#DF3B68]" />
-                    <span>Formula Penentuan Batas Waktu:</span>
+                    <span className="text-xs font-bold text-stone-800">Mode Penetapan Tenggat Waktu:</span>
                   </div>
 
-                  <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-emerald-800 text-xs font-bold self-start sm:self-auto">
-                    <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Tenggat: {deadline || '-'}</span>
+                  <div className="flex items-center bg-stone-200/60 p-1 rounded-xl text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineMode('FORMULA')}
+                      className={`px-3 py-1 rounded-lg font-semibold transition-all ${
+                        deadlineMode === 'FORMULA' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      Otomatis Rumus (M+1 / Akhir Periode)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineMode('CUSTOM')}
+                      className={`px-3 py-1 rounded-lg font-semibold transition-all ${
+                        deadlineMode === 'CUSTOM' ? 'bg-[#DF3B68] text-white shadow-xs' : 'text-stone-600 hover:text-[#DF3B68]'
+                      }`}
+                    >
+                      Kustom Bebas (Misal: Smt 1 di Oktober)
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-medium text-stone-600 mb-1">1. Posisi Bulan Batas:</label>
-                    <select
-                      value={deadlineRule}
-                      onChange={(e) => setDeadlineRule(e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
-                    >
-                      <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
-                      <option value="END_OF_PERIOD">Bulan Terakhir Periode Berkenaan</option>
-                      <option value="SAME_MONTH_DATE">Bulan Pertama / Awal Periode</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal:</label>
-                    <div className="flex gap-2">
+                {deadlineMode === 'FORMULA' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-medium text-stone-600 mb-1">1. Posisi Bulan Batas:</label>
                       <select
-                        value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
-                        onChange={(e) => {
-                          if (e.target.value === 'CUSTOM') {
-                            setExactDay(15);
-                            setCustomDayInput('15');
-                          } else {
-                            const val = Number(e.target.value);
-                            setExactDay(val);
-                            setCustomDayInput(String(val));
-                          }
-                        }}
-                        className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                        value={deadlineRule}
+                        onChange={(e) => setDeadlineRule(e.target.value as any)}
+                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
                       >
-                        <option value="31">Akhir Bulan (Max)</option>
-                        <option value="5">Tanggal 5</option>
-                        <option value="10">Tanggal 10</option>
-                        <option value="15">Tanggal 15</option>
-                        <option value="20">Tanggal 20</option>
-                        <option value="25">Tanggal 25</option>
-                        <option value="CUSTOM">Bebas (Input Manual)</option>
+                        <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
+                        <option value="END_OF_PERIOD">Bulan Terakhir Periode Berkenaan</option>
+                        <option value="SAME_MONTH_DATE">Bulan Pertama / Awal Periode</option>
                       </select>
+                    </div>
 
-                      <input
-                        type="number"
-                        min={1}
-                        max={31}
-                        placeholder="Tgl 1-31"
-                        value={customDayInput}
-                        onChange={(e) => {
-                          setCustomDayInput(e.target.value);
-                          const val = Number(e.target.value);
-                          if (val >= 1 && val <= 31) setExactDay(val);
-                        }}
-                        className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center"
-                      />
+                    <div>
+                      <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal:</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
+                          onChange={(e) => {
+                            if (e.target.value === 'CUSTOM') {
+                              setExactDay(15);
+                              setCustomDayInput('15');
+                            } else {
+                              const val = Number(e.target.value);
+                              setExactDay(val);
+                              setCustomDayInput(String(val));
+                            }
+                          }}
+                          className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                        >
+                          <option value="31">Akhir Bulan (Max)</option>
+                          <option value="5">Tanggal 5</option>
+                          <option value="10">Tanggal 10</option>
+                          <option value="15">Tanggal 15</option>
+                          <option value="20">Tanggal 20</option>
+                          <option value="25">Tanggal 25</option>
+                          <option value="CUSTOM">Bebas (Input Manual)</option>
+                        </select>
+
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          placeholder="Tgl 1-31"
+                          value={customDayInput}
+                          onChange={(e) => {
+                            setCustomDayInput(e.target.value);
+                            const val = Number(e.target.value);
+                            if (val >= 1 && val <= 31) setExactDay(val);
+                          }}
+                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center"
+                        />
+                      </div>
                     </div>
                   </div>
+                ) : (
+                  <div className="p-3 bg-white rounded-xl border border-stone-200 space-y-2">
+                    <label className="block text-xs font-semibold text-stone-700">
+                      Tentukan Tanggal Jatuh Tempo Bebas (Tanpa Terkunci Rumus Siklus):
+                    </label>
+                    <input
+                      type="date"
+                      value={deadline}
+                      onChange={(e) => setDeadline(e.target.value)}
+                      required
+                      className="w-full sm:w-64 px-3 py-2 rounded-xl border border-stone-200 bg-stone-50 text-xs font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
+                    />
+                    <p className="text-[11px] text-stone-400">
+                      Contoh: Tugas Semester 1 yang baru jatuh tempo di bulan Oktober dapat langsung dipilih tanggalnya di atas.
+                    </p>
+                  </div>
+                )}
+
+                <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-emerald-800 text-xs font-bold">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Tenggat Akhir Ditetapkan: {deadline || '-'}</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Prioritas */}
-          <div>
-            <label className="block text-xs font-semibold text-stone-600 mb-2">Tingkat Prioritas</label>
-            <div className="flex gap-3">
-              {[
-                { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-100 peer-checked:text-stone-800' },
-                { id: 'SEDANG', label: 'Sedang', style: 'peer-checked:bg-amber-50 peer-checked:text-amber-800 peer-checked:border-amber-300' },
-                { id: 'TINGGI', label: 'Tinggi', style: 'peer-checked:bg-rose-50 peer-checked:text-rose-800 peer-checked:border-rose-300' },
-              ].map((p) => (
-                <label key={p.id} className="cursor-pointer flex-1">
+          {/* Konfigurasi Ambang Masa Kritis & Prioritas */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+            {/* 1. Pengaturan Ambang Masa Kritis (H-X) */}
+            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
+              <label className="block text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                <BellRing className="w-4 h-4 text-[#DF3B68]" />
+                <span>Peringatan Masa Kritis (H-X) *</span>
+              </label>
+              <p className="text-[11px] text-stone-500">
+                Sistem akan memunculkan lencana kritis & mengirimkan notifikasi WA mulai H- berapa sebelum deadline:
+              </p>
+              
+              <div className="flex items-center gap-2 pt-1">
+                {[1, 3, 7, 14].map((days) => (
+                  <button
+                    type="button"
+                    key={days}
+                    onClick={() => setCriticalDaysThreshold(days)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      criticalDaysThreshold === days
+                        ? 'bg-[#DF3B68] text-white shadow-xs'
+                        : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    H-{days}
+                  </button>
+                ))}
+
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-xs text-stone-500 font-medium">Kustom:</span>
                   <input
-                    type="radio"
-                    name="priority"
-                    value={p.id}
-                    checked={priority === p.id}
-                    onChange={() => setPriority(p.id as any)}
-                    className="peer sr-only"
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={criticalDaysThreshold}
+                    onChange={(e) => setCriticalDaysThreshold(Number(e.target.value))}
+                    className="w-16 px-2 py-1 rounded-lg border border-stone-200 bg-white text-xs font-bold text-center text-rose-700"
                   />
-                  <div className={`p-2 text-center text-xs font-semibold rounded-xl border border-stone-200 text-stone-500 transition-all ${p.style}`}>
-                    {p.label}
-                  </div>
-                </label>
-              ))}
+                  <span className="text-xs text-stone-400">hari</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Tingkat Prioritas */}
+            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
+              <label className="block text-xs font-bold text-stone-800">Tingkat Prioritas Tugas</label>
+              <p className="text-[11px] text-stone-500">Klasifikasikan tingkat urgensi penyelesaian pekerjaan:</p>
+              <div className="flex gap-2 pt-1">
+                {[
+                  { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-200 peer-checked:text-stone-800' },
+                  { id: 'SEDANG', label: 'Sedang', style: 'peer-checked:bg-amber-100 peer-checked:text-amber-800 peer-checked:border-amber-300' },
+                  { id: 'TINGGI', label: 'Tinggi', style: 'peer-checked:bg-rose-100 peer-checked:text-rose-800 peer-checked:border-rose-300' },
+                ].map((p) => (
+                  <label key={p.id} className="cursor-pointer flex-1">
+                    <input
+                      type="radio"
+                      name="priority"
+                      value={p.id}
+                      checked={priority === p.id}
+                      onChange={() => setPriority(p.id as any)}
+                      className="peer sr-only"
+                    />
+                    <div className={`p-2 text-center text-xs font-semibold rounded-xl border border-stone-200 bg-white text-stone-500 transition-all ${p.style}`}>
+                      {p.label}
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </div>
