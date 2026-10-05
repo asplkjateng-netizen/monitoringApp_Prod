@@ -2,122 +2,96 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Bell, 
-  CheckCheck, 
-  ExternalLink, 
-  UserPlus, 
-  ShieldCheck, 
-  ChevronRight,
-  Sparkles
-} from 'lucide-react';
+import { Bell, CheckCheck, ExternalLink, UserPlus, ShieldAlert } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-interface NotificationBellProps {
-  userId?: string;
-}
-
-export function NotificationBell({ userId }: NotificationBellProps) {
+export function NotificationBell({ userId }: { userId?: string }) {
   const router = useRouter();
   const supabase = createClient();
 
-  const [unreadNotifs, setUnreadNotifs] = useState<any[]>([]);
-  const [pendingUsers, setPendingUsers] = useState<any[]>([]);
-  const [isAdminRole, setIsAdminRole] = useState(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [pendingUsersCount, setPendingUsersCount] = useState<number>(0);
   const [isOpen, setIsOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
 
-  // 1. Fetch Seluruh Data Notifikasi & Data Pending Approval
-  const fetchAllNotifications = async () => {
+  // 1. Ambil data notifikasi + data pending approval pegawai baru
+  const fetchAllNotifs = async () => {
     if (!userId) return;
 
     try {
-      // A. Ambil profil user saat ini untuk memeriksa hak otorisasi
-      const { data: myProfile } = await supabase
+      // A. Ambil profil user aktif
+      const { data: prof } = await supabase
         .from('profiles')
         .select('id, role, is_unit_admin, unit_id')
         .eq('id', userId)
         .maybeSingle();
 
-      if (myProfile) {
-        const isSuper = String(myProfile.role).toUpperCase() === 'SUPER_ADMIN';
-        const isUnitAdmin = myProfile.is_unit_admin === true || 
-                            ['KEPALA_UNIT', 'KEPALA_SEKSI'].includes(String(myProfile.role).toUpperCase());
+      if (prof) {
+        setUserProfile(prof);
+        const isSuperAdmin = String(prof.role).toUpperCase() === 'SUPER_ADMIN';
+        const isUnitAdmin = prof.is_unit_admin === true || prof.role === 'KEPALA_UNIT' || prof.role === 'KEPALA_SEKSI';
 
-        setIsAdminRole(isSuper || isUnitAdmin);
-
-        // B. Jika memiliki hak verifikasi, ambil data pegawai baru PENDING
-        if (isSuper) {
-          // Super Admin: Ambil semua user pending se-wilayah
-          const { data: pendingAll } = await supabase
+        // B. Query penghitung calon pegawai PENDING
+        if (isSuperAdmin) {
+          // Super Admin: pantau semua pendaftar baru
+          const { count } = await supabase
             .from('profiles')
-            .select('id, full_name, nip, created_at, unit_id')
-            .eq('approval_status', 'PENDING')
-            .order('created_at', { ascending: false });
-
-          setPendingUsers(pendingAll || []);
-        } else if (isUnitAdmin && myProfile.unit_id) {
-          // Admin Unit / Kasi: Ambil user pending di unit dan sub-unit bawahannya
+            .select('id', { count: 'exact', head: true })
+            .eq('approval_status', 'PENDING');
+          setPendingUsersCount(count || 0);
+        } else if (isUnitAdmin && prof.unit_id) {
+          // Admin Unit: pantau pendaftar di unitnya & seksi bawahannya
           const { data: childUnits } = await supabase
             .from('units')
             .select('id')
-            .or(`id.eq.${myProfile.unit_id},parent_id.eq.${myProfile.unit_id}`);
-
+            .or(`id.eq.${prof.unit_id},parent_id.eq.${prof.unit_id}`);
           const allowedUnitIds = (childUnits || []).map((u) => u.id);
-          if (!allowedUnitIds.includes(myProfile.unit_id)) {
-            allowedUnitIds.push(myProfile.unit_id);
-          }
 
-          const { data: pendingScoped } = await supabase
+          const { count } = await supabase
             .from('profiles')
-            .select('id, full_name, nip, created_at, unit_id')
+            .select('id', { count: 'exact', head: true })
             .eq('approval_status', 'PENDING')
-            .in('unit_id', allowedUnitIds)
-            .order('created_at', { ascending: false });
-
-          setPendingUsers(pendingScoped || []);
+            .in('unit_id', allowedUnitIds.length > 0 ? allowedUnitIds : [prof.unit_id]);
+          setPendingUsersCount(count || 0);
         }
       }
 
-      // C. Ambil notifikasi sistem personal user
-      const { data: notifData } = await supabase
+      // C. Query notifikasi tugas personal
+      const { data: notifsData, count: notifsCount } = await supabase
         .from('notifications')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('user_id', userId)
         .eq('is_read', false)
         .order('created_at', { ascending: false })
-        .limit(15);
+        .limit(20);
 
-      if (notifData) setUnreadNotifs(notifData);
+      if (notifsData) setNotifications(notifsData);
+      
+      const totalPending = isNaN(pendingUsersCount) ? 0 : pendingUsersCount;
+      const totalPersonal = notifsCount || 0;
+      setUnreadCount(totalPersonal + (totalPending > 0 ? 1 : 0));
     } catch (err) {
-      console.error('Error loading notifications:', err);
+      console.error('Error fetching notifications:', err);
     }
   };
 
   useEffect(() => {
     if (!userId) return;
-    fetchAllNotifications();
+    fetchAllNotifs();
 
-    // 2. Real-time Subscription: Mendengarkan Notifikasi Baru & Pendaftaran User Baru
+    // 2. Real-time Subscription: mendengarkan notifikasi & pendaftar baru
     const notifChannel = supabase
-      .channel(`notifs-realtime-${userId}`)
+      .channel(`bell-live-${userId}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => fetchAllNotifications()
+        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        () => fetchAllNotifs()
       )
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'profiles',
-        },
-        () => fetchAllNotifications()
+        { event: '*', schema: 'public', table: 'profiles' },
+        () => fetchAllNotifs()
       )
       .subscribe();
 
@@ -126,16 +100,14 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     };
   }, [userId]);
 
-  // Total badge merah (Notifikasi pribadi + Total pegawai baru yang belum diverifikasi)
-  const totalUnreadCount = unreadNotifs.length + pendingUsers.length;
-
   const handleItemClick = async (notif: any) => {
     await supabase
       .from('notifications')
       .update({ is_read: true })
       .eq('id', notif.id);
 
-    setUnreadNotifs((prev) => prev.filter((n) => n.id !== notif.id));
+    setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
+    setUnreadCount((prev) => Math.max(0, prev - 1));
     setIsOpen(false);
 
     if (notif.action_link) {
@@ -143,13 +115,8 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     }
   };
 
-  const handleGoToApprovals = () => {
-    setIsOpen(false);
-    router.push('/admin/approvals');
-  };
-
   const handleMarkAllRead = async () => {
-    if (!userId || unreadNotifs.length === 0) return;
+    if (!userId || notifications.length === 0) return;
 
     await supabase
       .from('notifications')
@@ -157,90 +124,83 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       .eq('user_id', userId)
       .eq('is_read', false);
 
-    setUnreadNotifs([]);
+    setNotifications([]);
+    setUnreadCount(pendingUsersCount > 0 ? 1 : 0);
   };
 
   return (
-    <div className="relative">
+    <div className="relative" id="tour-notif-btn">
       <button
-        id="tour-notification-bell"
-        type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Notifikasi Lonceng"
-        className="w-9 h-9 rounded-full bg-white border border-stone-200/80 shadow-xs flex items-center justify-center text-stone-600 hover:text-[#DF3B68] hover:border-[#DF3B68]/30 hover:bg-rose-50/50 transition-all relative focus:outline-none"
+        className="w-9 h-9 rounded-full bg-white border border-stone-200/60 shadow-sm flex items-center justify-center text-stone-600 hover:bg-stone-50 transition-colors relative"
       >
         <Bell className="w-4 h-4" />
-        {totalUnreadCount > 0 && (
+        {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#DF3B68] text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-xs animate-pulse">
-            {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2.5 w-84 sm:w-96 bg-white rounded-3xl shadow-2xl border border-stone-200/80 p-4 z-50 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute right-0 mt-2 w-84 sm:w-96 bg-white rounded-3xl shadow-xl border border-stone-200/70 p-4 z-50 animate-in fade-in zoom-in-95 duration-150">
           <div className="flex items-center justify-between pb-3 border-b border-stone-100">
             <div className="flex items-center gap-2">
               <h4 className="text-xs font-bold text-stone-900">Notifikasi Sistem</h4>
-              {totalUnreadCount > 0 && (
-                <span className="text-[10px] bg-[#DF3B68]/10 text-[#DF3B68] px-2 py-0.5 rounded-full font-bold">
-                  {totalUnreadCount} Baru
+              {unreadCount > 0 && (
+                <span className="text-[10px] bg-[#DF3B68]/10 text-[#DF3B68] px-2 py-0.5 rounded-full font-semibold">
+                  {unreadCount} Baru
                 </span>
               )}
             </div>
 
-            {unreadNotifs.length > 0 && (
+            {notifications.length > 0 && (
               <button
-                type="button"
                 onClick={handleMarkAllRead}
                 className="text-[10px] text-stone-500 hover:text-stone-800 flex items-center gap-1 font-medium transition-colors"
               >
-                <CheckCheck className="w-3 h-3" /> Tandai dibaca
+                <CheckCheck className="w-3 h-3" /> Tandai personal dibaca
               </button>
             )}
           </div>
 
-          <div className="max-h-80 overflow-y-auto divide-y divide-stone-100 py-1 space-y-1">
-            {/* KARTU NOTIFIKASI KHUSUS SUPER ADMIN & ADMIN UNIT: PERSETUJUAN PEGAWAI */}
-            {isAdminRole && pendingUsers.length > 0 && (
+          <div className="max-h-80 overflow-y-auto divide-y divide-stone-100 py-1">
+            {/* KARTU KHUSUS: APPROVAL PEGAWAI BARU */}
+            {pendingUsersCount > 0 && (
               <div
-                onClick={handleGoToApprovals}
-                className="p-3 bg-rose-50/70 border border-rose-200 rounded-2xl cursor-pointer hover:bg-rose-100/70 transition-all space-y-1.5 mt-1"
+                onClick={() => {
+                  setIsOpen(false);
+                  router.push('/admin/approvals');
+                }}
+                className="my-1.5 p-3 rounded-2xl bg-amber-50/80 border border-amber-200/80 hover:bg-amber-100/70 cursor-pointer transition-colors space-y-1 group"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#DF3B68] text-white flex items-center justify-center shrink-0">
-                      <UserPlus className="w-3.5 h-3.5" />
-                    </div>
-                    <p className="text-xs font-bold text-[#DF3B68]">
-                      Verifikasi Pegawai Baru
-                    </p>
+                  <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs">
+                    <UserPlus className="w-3.5 h-3.5 text-[#DF3B68]" />
+                    <span>Verifikasi Pegawai Baru</span>
                   </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DF3B68] text-white shadow-xs">
-                    {pendingUsers.length} Menunggu
+                  <span className="text-[10px] bg-[#DF3B68] text-white px-2 py-0.5 rounded-full font-bold">
+                    {pendingUsersCount} Menunggu
                   </span>
                 </div>
-
-                <p className="text-[11px] text-stone-600 leading-snug">
-                  Terdapat <strong>{pendingUsers.length} akun pegawai baru</strong> yang mendaftar dan menunggu persetujuan Anda untuk dapat mengakses sistem.
+                <p className="text-[11px] text-stone-600 leading-relaxed">
+                  Terdapat <strong>{pendingUsersCount} pendaftar baru</strong> yang menunggu persetujuan akun Anda.
                 </p>
-
-                <div className="flex items-center justify-between text-[10px] font-semibold text-[#DF3B68] pt-1">
-                  <span>Buka Halaman Verifikasi</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
+                <div className="flex items-center gap-1 text-[10px] text-[#DF3B68] font-semibold pt-0.5 group-hover:underline">
+                  <span>Buka Menu Verifikasi Pegawai</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
                 </div>
               </div>
             )}
 
             {/* DAFTAR NOTIFIKASI PERSONAL */}
-            {unreadNotifs.length === 0 && pendingUsers.length === 0 ? (
-              <div className="py-10 text-center space-y-1">
-                <Sparkles className="w-6 h-6 text-stone-300 mx-auto" />
-                <p className="text-xs text-stone-500 font-medium">Belum ada notifikasi baru</p>
-                <p className="text-[10px] text-stone-400">Semua tugas dan aktivitas termonitor dengan baik.</p>
-              </div>
+            {notifications.length === 0 && pendingUsersCount === 0 ? (
+              <p className="text-xs text-stone-400 py-8 text-center">
+                Belum ada notifikasi baru
+              </p>
             ) : (
-              unreadNotifs.map((n) => (
+              notifications.map((n) => (
                 <div
                   key={n.id}
                   onClick={() => handleItemClick(n)}
@@ -257,7 +217,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
                   <p className="text-[11px] text-stone-500 line-clamp-2 leading-relaxed">
                     {n.message}
                   </p>
-                  <span className="text-[9px] text-stone-400 block pt-0.5 font-mono">
+                  <span className="text-[9px] text-stone-400 block pt-0.5">
                     {new Date(n.created_at).toLocaleTimeString('id-ID', {
                       hour: '2-digit',
                       minute: '2-digit',
