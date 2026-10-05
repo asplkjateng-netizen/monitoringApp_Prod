@@ -62,7 +62,6 @@ const TOUR_STEPS = [
   },
 ];
 
-// KOMPONEN BUBBLE TUTORIAL TOUR
 function TutorialTourModal() {
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -171,7 +170,6 @@ function TutorialTourModal() {
   );
 }
 
-// TOPBAR CONTENT
 function TopBarContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -191,15 +189,33 @@ function TopBarContent() {
   useEffect(() => {
     async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*, unit:units(*)')
-          .eq('id', user.id)
-          .single();
-        if (data) setProfile(data);
+      if (!user) return;
+
+      // Defensive fetch: ambil data profiles tanpa ketergantungan relasi schema PostgREST
+      const { data: profData } = await supabase
+        .from('profiles')
+        .select('id, full_name, nip, role, is_unit_admin, unit_id, approval_status')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (profData) {
+        let unitData = null;
+        if (profData.unit_id) {
+          const { data: uData } = await supabase
+            .from('units')
+            .select('id, name, code, level')
+            .eq('id', profData.unit_id)
+            .maybeSingle();
+          unitData = uData;
+        }
+
+        setProfile({
+          ...profData,
+          unit: unitData
+        });
       }
     }
+
     loadUser();
 
     const handleClickOutside = (event: MouseEvent) => {
@@ -212,7 +228,7 @@ function TopBarContent() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [supabase]);
+  }, []);
 
   const handleSelectPeriod = (periodId: string) => {
     setIsPeriodOpen(false);
@@ -232,7 +248,7 @@ function TopBarContent() {
   };
 
   const getInitials = (name: string) => {
-    if (!name) return '';
+    if (!name) return 'U';
     const parts = name.trim().split(' ');
     if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
     return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -242,18 +258,19 @@ function TopBarContent() {
     <>
       <TutorialTourModal />
       <header className="h-20 bg-canvas px-6 md:px-8 flex items-center justify-between border-b border-stone-200/40 sticky top-0 z-30">
-        {/* Kiri: Info Unit */}
+        {/* Kiri: Info Unit Kerja Aktif */}
         <div className="flex items-center gap-3">
           <div className="inline-flex items-center gap-2 bg-white border border-stone-200/80 px-3.5 py-1.5 rounded-full shadow-sm text-xs text-stone-700">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-semibold text-stone-900">{profile?.unit?.name ?? 'Unit Kerja'}</span>
-            <span className="text-[11px] text-stone-400 font-mono">({profile?.role ?? 'STAF'})</span>
+            <span className="font-semibold text-stone-900">{profile?.unit?.name ?? 'Memuat Unit...'}</span>
+            <span className="text-[11px] font-bold text-[#DF3B68] bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100 font-mono">
+              {profile?.role ?? 'MEMUAT'}
+            </span>
           </div>
         </div>
 
-        {/* Kanan: Dropdown Periode + Tombol Tutorial (?) + Notifikasi + Profil */}
+        {/* Kanan: Dropdown Periode + Tombol Panduan + Notifikasi + Profil */}
         <div className="flex items-center gap-3">
-          {/* Tombol Panduan Tutorial (?) */}
           <button
             type="button"
             onClick={triggerTour}
@@ -270,7 +287,7 @@ function TopBarContent() {
               onClick={() => setIsPeriodOpen((prev) => !prev)}
               className="flex items-center gap-2 bg-white border border-stone-200/80 px-3.5 py-2 rounded-full text-xs text-stone-700 shadow-sm hover:bg-stone-50 hover:border-stone-300 transition-all focus:outline-none"
             >
-              <CalendarDays className="w-3.5 h-3.5 text-primary" />
+              <CalendarDays className="w-3.5 h-3.5 text-[#DF3B68]" />
               <span>Periode: <strong className="text-stone-900">{selectedPeriodObj.label}</strong></span>
               <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${isPeriodOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -289,14 +306,14 @@ function TopBarContent() {
                         type="button"
                         onClick={() => handleSelectPeriod(opt.id)}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-2xl text-xs text-left transition-colors ${
-                          isSelected ? 'bg-primary/10 text-primary font-bold' : 'text-stone-700 hover:bg-stone-50'
+                          isSelected ? 'bg-rose-50 text-[#DF3B68] font-bold' : 'text-stone-700 hover:bg-stone-50'
                         }`}
                       >
                         <div>
                           <div>{opt.label}</div>
                           <div className="text-[10px] text-stone-400 font-normal">{opt.desc}</div>
                         </div>
-                        {isSelected && <Check className="w-4 h-4 text-primary" />}
+                        {isSelected && <Check className="w-4 h-4 text-[#DF3B68]" />}
                       </button>
                     );
                   })}
@@ -307,16 +324,16 @@ function TopBarContent() {
 
           {profile?.id && <NotificationBell userId={profile.id} />}
 
-          {/* Profil Avatar & Dropdown Akun */}
+          {/* Profil Avatar & Menu Akun */}
           <div className="relative pl-1" ref={dropdownRef}>
             <button
               type="button"
               onClick={() => setIsDropdownOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 p-1 rounded-full hover:ring-2 hover:ring-primary/20 transition-all focus:outline-none"
+              className="flex items-center gap-1.5 p-1 rounded-full hover:ring-2 hover:ring-[#DF3B68]/20 transition-all focus:outline-none"
               title="Menu Akun Saya"
             >
-              <div className="w-9 h-9 rounded-full bg-primary/10 text-primary font-bold flex items-center justify-center text-xs shadow-xs border border-primary/20">
-                {profile?.full_name ? getInitials(profile.full_name) : <UserCircle2 className="w-5 h-5 text-primary" />}
+              <div className="w-9 h-9 rounded-full bg-rose-50 text-[#DF3B68] font-bold flex items-center justify-center text-xs shadow-xs border border-rose-200">
+                {profile?.full_name ? getInitials(profile.full_name) : <UserCircle2 className="w-5 h-5 text-[#DF3B68]" />}
               </div>
               <ChevronDown className={`w-3 h-3 text-stone-400 hidden sm:block transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -332,7 +349,7 @@ function TopBarContent() {
                   <Link
                     href="/profile"
                     onClick={() => setIsDropdownOpen(false)}
-                    className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-full text-xs font-medium text-stone-700 hover:bg-primary/10 hover:text-primary transition-colors"
+                    className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-full text-xs font-medium text-stone-700 hover:bg-rose-50 hover:text-[#DF3B68] transition-colors"
                   >
                     <User className="w-4 h-4 text-stone-400" />
                     <span>Profil Saya</span>
@@ -343,7 +360,7 @@ function TopBarContent() {
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-full text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-full text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors text-left"
                   >
                     <LogOut className="w-4 h-4 text-rose-500" />
                     <span>Keluar Sistem</span>
