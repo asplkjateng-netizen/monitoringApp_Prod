@@ -7,7 +7,9 @@ import {
   KeyRound, 
   CheckCircle2, 
   AlertCircle,
-  BadgeCheck
+  BadgeCheck,
+  Phone,
+  Bell
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -20,6 +22,8 @@ interface UserProfile {
   employment_status: string;
   role: string;
   approval_status: string;
+  phone_number: string | null;
+  wa_notify_critical: boolean;
   unit: {
     id: string;
     name: string;
@@ -36,11 +40,15 @@ export default function ProfilePage() {
   const [email, setEmail] = useState<string>('');
   const [parentUnitName, setParentUnitName] = useState<string>('');
 
-  // Form states
+  // Form states untuk Data Diri & WhatsApp
   const [fullName, setFullName] = useState('');
-  const [isUpdatingName, setIsUpdatingName] = useState(false);
-  const [nameSuccess, setNameSuccess] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [waNotifyCritical, setWaNotifyCritical] = useState(true);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
+  // Form states untuk Password
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
@@ -60,12 +68,14 @@ export default function ProfilePage() {
       // Ambil data profil inti secara mandiri
       const { data: profData, error } = await supabase
         .from('profiles')
-        .select('id, full_name, nip, employment_status, role, approval_status, unit_id')
+        .select('id, full_name, nip, employment_status, role, approval_status, unit_id, phone_number, wa_notify_critical')
         .eq('id', user.id)
         .maybeSingle();
 
       if (!error && profData) {
         setFullName(profData.full_name || '');
+        setPhoneNumber(profData.phone_number || '');
+        setWaNotifyCritical(profData.wa_notify_critical ?? true);
 
         let unitObj = null;
         if (profData.unit_id) {
@@ -77,7 +87,6 @@ export default function ProfilePage() {
 
           if (uData) {
             unitObj = uData;
-            // Ambil nama unit induk jika ada
             if (uData.parent_id) {
               const { data: parent } = await supabase
                 .from('units')
@@ -104,24 +113,50 @@ export default function ProfilePage() {
     return `${nip.slice(0, 8)} ${nip.slice(8, 14)} ${nip.slice(14, 15)} ${nip.slice(15, 18)}`;
   };
 
-  const handleUpdateName = async (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !fullName.trim()) return;
 
-    setIsUpdatingName(true);
-    setNameSuccess(false);
+    setProfileError(null);
+
+    // Sanitasi format nomor WhatsApp Indonesia
+    let cleanPhone = phoneNumber.replace(/[^0-9]/g, '');
+    if (cleanPhone) {
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '62' + cleanPhone.slice(1);
+      }
+      if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+        setProfileError('Nomor WhatsApp tidak valid (minimal 10 digit, contoh: 08123456789).');
+        return;
+      }
+    }
+
+    setIsUpdatingProfile(true);
+    setProfileSuccess(false);
 
     const { error } = await supabase
       .from('profiles')
-      .update({ full_name: fullName.trim(), updated_at: new Date().toISOString() })
+      .update({ 
+        full_name: fullName.trim(),
+        phone_number: cleanPhone || null,
+        wa_notify_critical: waNotifyCritical,
+        updated_at: new Date().toISOString() 
+      })
       .eq('id', profile.id);
 
     if (!error) {
-      setNameSuccess(true);
-      setProfile((prev) => prev ? { ...prev, full_name: fullName.trim() } : null);
-      setTimeout(() => setNameSuccess(false), 3000);
+      setProfileSuccess(true);
+      setProfile((prev) => prev ? { 
+        ...prev, 
+        full_name: fullName.trim(),
+        phone_number: cleanPhone || null,
+        wa_notify_critical: waNotifyCritical
+      } : null);
+      setTimeout(() => setProfileSuccess(false), 3000);
+    } else {
+      setProfileError(error.message);
     }
-    setIsUpdatingName(false);
+    setIsUpdatingProfile(false);
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -161,7 +196,7 @@ export default function ProfilePage() {
       <div>
         <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Profil Pegawai</h1>
         <p className="text-xs text-stone-500 mt-1">
-          Informasi identitas kepegawaian, unit kerja aktif, dan pengaturan keamanan akun.
+          Informasi identitas kepegawaian, kontak WhatsApp dinas, dan pengaturan keamanan akun.
         </p>
       </div>
 
@@ -196,7 +231,7 @@ export default function ProfilePage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Kolom Kiri: Penempatan Unit & Edit Nama */}
+        {/* Kolom Kiri: Penempatan Unit & Edit Biodata / WhatsApp */}
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm border-b border-stone-100 pb-3">
@@ -205,7 +240,7 @@ export default function ProfilePage() {
             </div>
             <div className="space-y-3 text-xs">
               <div>
-                <p className="text-stone-400 font-medium">Seksi / Subbagian Aktif</p>
+                <p className="text-stone-400 font-medium">Unit / Seksi Aktif</p>
                 <p className="font-semibold text-stone-900 text-sm mt-0.5">{profile?.unit?.name || '-'}</p>
                 <p className="text-[11px] text-stone-400 font-mono mt-0.5">Kode: {profile?.unit?.code || '-'}</p>
               </div>
@@ -221,26 +256,55 @@ export default function ProfilePage() {
           <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm border-b border-stone-100 pb-3">
               <User className="w-4 h-4 text-[#DF3B68]" />
-              <span>Perbarui Nama Lengkap</span>
+              <span>Perbarui Profil & Kontak WhatsApp</span>
             </div>
-            <form onSubmit={handleUpdateName} className="space-y-4">
+
+            {profileError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{profileError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateProfile} className="space-y-4">
               <Input
                 label="Nama Lengkap Beserta Gelar"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
               />
-              {nameSuccess && (
+
+              <Input
+                label="Nomor WhatsApp Dinas"
+                placeholder="08123456789 atau 628123456789"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+              />
+
+              <label className="flex items-start gap-2.5 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={waNotifyCritical}
+                  onChange={(e) => setWaNotifyCritical(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-[#DF3B68] rounded border-stone-300 focus:ring-[#DF3B68]"
+                />
+                <span className="text-xs text-stone-600 select-none leading-relaxed">
+                  Terima notifikasi otomatis tugas kritis (H-X deadline) via WhatsApp.
+                </span>
+              </label>
+
+              {profileSuccess && (
                 <div className="text-[11px] text-emerald-600 flex items-center gap-1.5 font-medium">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Nama berhasil disimpan.
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Profil dan preferensi WhatsApp berhasil disimpan.
                 </div>
               )}
+
               <Button
                 type="submit"
-                isLoading={isUpdatingName}
+                isLoading={isUpdatingProfile}
                 className="w-full bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs py-2"
               >
-                Simpan Perubahan
+                Simpan Perubahan Profil
               </Button>
             </form>
           </div>
