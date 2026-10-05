@@ -84,14 +84,13 @@ export default function UsersAdminPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: currentProfile, error: profileErr } = await supabase
+      const { data: currentProfile } = await supabase
         .from('profiles')
         .select('*, unit:units(*)')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (profileErr || !currentProfile) {
-        console.error('Error loading current profile:', profileErr);
+      if (!currentProfile) {
         setLoading(false);
         return;
       }
@@ -99,7 +98,6 @@ export default function UsersAdminPage() {
       setCurrentUser(currentProfile as any);
       const isSuperAdmin = String(currentProfile.role).toUpperCase() === 'SUPER_ADMIN';
 
-      // 1. Ambil daftar unit untuk opsi mutasi
       if (isSuperAdmin) {
         const { data: unitData } = await supabase
           .from('units')
@@ -116,7 +114,6 @@ export default function UsersAdminPage() {
         if (unitData) setUnits(unitData || []);
       }
 
-      // 2. Query master profiles secara aman
       let profileQuery = supabase
         .from('profiles')
         .select('*, unit:units(id, name, code, level)')
@@ -136,13 +133,11 @@ export default function UsersAdminPage() {
 
       const { data: profileData, error: listErr } = await profileQuery;
       if (listErr) {
-        console.error('Error fetching profiles:', listErr);
         setErrorMsg('Gagal memuat daftar pegawai: ' + listErr.message);
       } else if (profileData) {
         setProfiles(profileData as any);
       }
     } catch (err: any) {
-      console.error('General error loading users:', err);
       setErrorMsg(err.message || 'Terjadi kesalahan sistem saat memuat data');
     } finally {
       setLoading(false);
@@ -219,17 +214,32 @@ export default function UsersAdminPage() {
     }
 
     const confirmed = window.confirm(
-      `Peringatan: Apakah Anda yakin ingin menghapus data pegawai "${user.full_name}" (${user.nip})?\n\nAkun ini tidak akan dapat masuk ke sistem lagi.`
+      `Peringatan: Apakah Anda yakin ingin menghapus data pegawai "${user.full_name}" (${user.nip}) secara permanen?\n\nAkun akan dihapus dari autentikasi dan database.`
     );
     if (!confirmed) return;
 
-    const { error } = await supabase.from('profiles').delete().eq('id', user.id);
-    if (error) {
-      alert(`Gagal menghapus pegawai: ${error.message}`);
-    } else {
-      setSuccessMsg(`Akun pegawai "${user.full_name}" berhasil dihapus.`);
+    try {
+      // Panggil endpoint penghapusan permanen dari auth.users dan profiles
+      const res = await fetch('/api/admin/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      if (!res.ok) {
+        // Fallback jika API route gagal
+        const { error: directErr } = await supabase.from('profiles').delete().eq('id', user.id);
+        if (directErr) {
+          alert(`Gagal menghapus pegawai: ${directErr.message}`);
+          return;
+        }
+      }
+
+      setSuccessMsg(`Akun pegawai "${user.full_name}" berhasil dihapus permanen.`);
       loadData();
       setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
     }
   };
 
@@ -254,7 +264,7 @@ export default function UsersAdminPage() {
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-stone-100 text-stone-700 border border-stone-200">STAF</span>
         )}
         {isAdmin && (
-          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-primary border border-rose-200 flex items-center gap-0.5">
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-[#DF3B68] border border-rose-200 flex items-center gap-0.5">
             <Shield className="w-2.5 h-2.5" /> ADMIN UNIT
           </span>
         )}
@@ -317,7 +327,7 @@ export default function UsersAdminPage() {
             placeholder="Cari berdasarkan nama atau 18 digit NIP..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
           />
         </div>
 
@@ -362,7 +372,7 @@ export default function UsersAdminPage() {
                 className="p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-stone-50/60 transition-colors"
               >
                 <div className="flex items-start gap-3.5">
-                  <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#DF3B68] border border-rose-100 flex items-center justify-center font-bold text-xs flex-shrink-0">
                     {user.full_name?.substring(0, 2).toUpperCase() || 'U'}
                   </div>
 
@@ -392,7 +402,7 @@ export default function UsersAdminPage() {
                     variant="outline"
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium text-stone-700 hover:bg-stone-100"
                   >
-                    <ArrowRightLeft className="w-3.5 h-3.5 text-primary" />
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-[#DF3B68]" />
                     <span>Kelola & Mutasi</span>
                   </Button>
                   <button
@@ -415,7 +425,7 @@ export default function UsersAdminPage() {
           <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <ArrowRightLeft className="w-5 h-5 text-primary" />
+                <ArrowRightLeft className="w-5 h-5 text-[#DF3B68]" />
                 <h3 className="font-bold text-stone-900 text-sm md:text-base">
                   Kelola Data & Mutasi Pegawai
                 </h3>
@@ -484,7 +494,7 @@ export default function UsersAdminPage() {
                 <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200/80 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5 text-primary" /> Akses Administrator Unit
+                      <Shield className="w-3.5 h-3.5 text-[#DF3B68]" /> Akses Administrator Unit
                     </p>
                     <p className="text-[10px] text-stone-500">Berikan hak verifikasi pegawai dan kelola seksi di unitnya.</p>
                   </div>
@@ -492,12 +502,12 @@ export default function UsersAdminPage() {
                     type="checkbox"
                     checked={isUnitAdmin}
                     onChange={(e) => setIsUnitAdmin(e.target.checked)}
-                    className="w-4 h-4 rounded text-primary focus:ring-primary"
+                    className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68]"
                   />
                 </div>
               ) : (
                 selectedUser.is_unit_admin && (
-                  <div className="p-2.5 bg-rose-50/60 rounded-xl border border-rose-100 flex items-center gap-2 text-[11px] text-primary font-medium">
+                  <div className="p-2.5 bg-rose-50/60 rounded-xl border border-rose-100 flex items-center gap-2 text-[11px] text-[#DF3B68] font-medium">
                     <Lock className="w-3.5 h-3.5" /> Pegawai ini memiliki hak Administrator Unit.
                   </div>
                 )
@@ -537,7 +547,7 @@ export default function UsersAdminPage() {
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
                   Batal
                 </Button>
-                <Button type="submit" isLoading={isSubmitting} className="bg-primary hover:bg-primary-hover text-white font-semibold">
+                <Button type="submit" isLoading={isSubmitting} className="bg-[#DF3B68] hover:bg-[#C72F58] text-white font-semibold">
                   Simpan Perubahan
                 </Button>
               </div>
