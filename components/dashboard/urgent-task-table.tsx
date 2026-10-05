@@ -7,13 +7,37 @@ import type { Task } from '@/types/database.types';
 
 export function UrgentTaskTable({ 
   tasks, 
-  title = "Tugas Kritis & Mendekati Tenggat (H-3)",
+  title = "Tugas Kritis & Mendekati Tenggat",
   viewAllLink = "/tasks?status=KRITIS" 
 }: { 
   tasks: Task[];
   title?: string;
   viewAllLink?: string;
 }) {
+  const renderCategoryBadge = (category?: string) => {
+    switch (category) {
+      case 'TAMBAHAN':
+        return (
+          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+            Tambahan
+          </span>
+        );
+      case 'IMPROVISASI':
+        return (
+          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+            Improvisasi
+          </span>
+        );
+      case 'TUSI':
+      default:
+        return (
+          <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            Tusi Pokok
+          </span>
+        );
+    }
+  };
+
   const renderDeadlineBadge = (task: Task) => {
     if (task.status === 'SELESAI') {
       return (
@@ -29,6 +53,7 @@ export function UrgentTaskTable({
     deadlineDate.setHours(0, 0, 0, 0);
     const diffTime = deadlineDate.getTime() - today.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    const criticalThreshold = (task as any).critical_days_threshold || 3;
 
     if (diffDays < 0) {
       return (
@@ -42,9 +67,15 @@ export function UrgentTaskTable({
           Batas Hari Ini
         </span>
       );
+    } else if (diffDays <= criticalThreshold) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+          Sisa {diffDays} hari (H-{criticalThreshold})
+        </span>
+      );
     } else {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-stone-100 text-stone-700">
           Sisa {diffDays} hari
         </span>
       );
@@ -100,10 +131,13 @@ export function UrgentTaskTable({
               tasks.map((task) => (
                 <tr key={task.id} className="hover:bg-stone-50/50 transition-colors">
                   <td className="py-3.5 font-medium text-stone-800 pr-4">
-                    <div>
-                      <p className="font-semibold text-stone-900">{task.title}</p>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {renderCategoryBadge((task as any).category)}
+                        <p className="font-semibold text-stone-900">{task.title}</p>
+                      </div>
                       {task.kendala_note && task.status === 'TERKENDALA' && (
-                        <p className="text-[11px] text-rose-600 mt-0.5 font-normal">
+                        <p className="text-[11px] text-rose-600 font-normal">
                           Kendala: {task.kendala_note}
                         </p>
                       )}
@@ -125,7 +159,7 @@ export function UrgentTaskTable({
                   </td>
                   <td className="py-3.5 font-semibold text-stone-700">{task.progress_pct}%</td>
                   
-                  {/* Akses Link Bukti Langsung (Bisa dibuka PIC & Seluruh Atasan) */}
+                  {/* Akses Link Bukti Langsung */}
                   <td className="py-3.5 text-center whitespace-nowrap">
                     {task.evidence_link ? (
                       <a
