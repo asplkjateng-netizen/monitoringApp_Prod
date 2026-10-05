@@ -75,17 +75,34 @@ export default function UnitsAdminPage() {
   const fetchInitialData = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
+
     if (user) {
+      // Ambil profil secara defensif
       const { data: profile } = await supabase
         .from('profiles')
-        .select('*, unit:units(*)')
+        .select('id, full_name, role, unit_id')
         .eq('id', user.id)
-        .single();
-      if (profile) setCurrentUser(profile as Profile);
+        .maybeSingle();
+
+      if (profile) {
+        let unitData = null;
+        if (profile.unit_id) {
+          const { data: uData } = await supabase
+            .from('units')
+            .select('id, name, code, level')
+            .eq('id', profile.unit_id)
+            .maybeSingle();
+          unitData = uData;
+        }
+        setCurrentUser({ ...profile, unit: unitData } as any);
+      }
     }
 
-    // Ambil template hierarki
-    const { data: tmpls } = await supabase.from('hierarchy_templates').select('*').order('name');
+    // Ambil master template hierarki
+    const { data: tmpls } = await supabase
+      .from('hierarchy_templates')
+      .select('*')
+      .order('name');
     if (tmpls) setTemplates(tmpls as any);
 
     await fetchUnits();
@@ -275,18 +292,32 @@ export default function UnitsAdminPage() {
   };
 
   const handleDelete = async (id: string, unitName: string) => {
-    const confirmed = window.confirm(
-      `Apakah Anda yakin ingin menghapus unit "${unitName}"?\n\nPERINGATAN: Menghapus unit induk akan menghapus seluruh sub-unit di bawahnya.`
-    );
-    if (!confirmed) return;
+    try {
+      // 1. Cek apakah ada pegawai yang sedang bertugas di unit ini
+      const { count } = await supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('unit_id', id);
 
-    const { error } = await supabase.from('units').delete().eq('id', id);
-    if (error) {
-      alert(`Gagal menghapus unit: ${error.message}`);
-    } else {
-      setSuccessMsg(`Unit "${unitName}" berhasil dihapus.`);
-      fetchUnits();
-      setTimeout(() => setSuccessMsg(''), 3000);
+      let confirmText = `Apakah Anda yakin ingin menghapus unit "${unitName}"?\n\nPERINGATAN: Menghapus unit induk akan menghapus seluruh sub-unit di bawahnya.`;
+      
+      if (count && count > 0) {
+        confirmText = `PERINGATAN: Terdapat ${count} pegawai aktif di unit "${unitName}".\n\nJika unit ini dihapus, status unit pegawai-pegawai tersebut akan dilepas (mutasi). Lanjutkan penghapusan?`;
+      }
+
+      const confirmed = window.confirm(confirmText);
+      if (!confirmed) return;
+
+      const { error } = await supabase.from('units').delete().eq('id', id);
+      if (error) {
+        alert(`Gagal menghapus unit: ${error.message}`);
+      } else {
+        setSuccessMsg(`Unit "${unitName}" berhasil dihapus.`);
+        fetchUnits();
+        setTimeout(() => setSuccessMsg(''), 3000);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
     }
   };
 
@@ -333,7 +364,7 @@ export default function UnitsAdminPage() {
                 className="w-7 h-7 rounded-xl bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-600 transition-transform"
               >
                 <ChevronRight
-                  className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-primary font-bold' : ''}`}
+                  className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-[#DF3B68] font-bold' : ''}`}
                 />
               </button>
             ) : (
@@ -423,13 +454,13 @@ export default function UnitsAdminPage() {
               }}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-full border-stone-200 hover:bg-stone-50"
             >
-              <Copy className="w-4 h-4 text-primary" />
+              <Copy className="w-4 h-4 text-[#DF3B68]" />
               <span>Terapkan Template</span>
             </Button>
           )}
           <Button
             onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-sm"
+            className="inline-flex items-center gap-1.5 bg-[#DF3B68] hover:bg-[#C72F58] text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah Unit Baru</span>
@@ -453,7 +484,7 @@ export default function UnitsAdminPage() {
             placeholder="Cari nama unit atau kode..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
           />
         </div>
 
@@ -586,7 +617,7 @@ export default function UnitsAdminPage() {
           <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <FolderTree className="w-5 h-5 text-primary" />
+                <FolderTree className="w-5 h-5 text-[#DF3B68]" />
                 <h3 className="font-bold text-stone-900 text-sm md:text-base">
                   {editingId ? 'Edit Unit Organisasi' : 'Tambah Unit Organisasi Baru'}
                 </h3>
@@ -630,7 +661,7 @@ export default function UnitsAdminPage() {
                     placeholder="Contoh: MSKI, PD, VERA"
                     value={tusiType}
                     onChange={(e) => setTusiType(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-primary/20 uppercase"
+                    className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 uppercase"
                   />
                 </div>
               </div>
@@ -688,7 +719,7 @@ export default function UnitsAdminPage() {
                 <Button
                   type="submit"
                   isLoading={isSubmitting}
-                  className="bg-primary hover:bg-primary-hover text-white font-semibold"
+                  className="bg-[#DF3B68] hover:bg-[#C72F58] text-white font-semibold"
                 >
                   {editingId ? 'Simpan Perubahan' : 'Daftarkan Unit'}
                 </Button>
@@ -704,7 +735,7 @@ export default function UnitsAdminPage() {
           <div className="bg-white w-full max-w-md rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <Copy className="w-5 h-5 text-primary" />
+                <Copy className="w-5 h-5 text-[#DF3B68]" />
                 <h3 className="font-bold text-stone-900 text-sm md:text-base">
                   Terapkan Template Hierarki
                 </h3>
@@ -769,7 +800,7 @@ export default function UnitsAdminPage() {
                 <Button
                   type="submit"
                   isLoading={isCloning}
-                  className="bg-primary hover:bg-primary-hover text-white font-semibold"
+                  className="bg-[#DF3B68] hover:bg-[#C72F58] text-white font-semibold"
                 >
                   Terapkan Struktur
                 </Button>
