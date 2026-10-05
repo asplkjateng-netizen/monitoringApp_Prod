@@ -37,7 +37,7 @@ export function Sidebar() {
       if (data) setProfile(data as Profile);
     }
     getProfile();
-  }, []);
+  }, [supabase]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -53,55 +53,40 @@ export function Sidebar() {
     {
       label: 'MONITORING',
       items: [
-        { 
-          id: 'tour-sidebar-dashboard',
-          label: 'Dashboard', 
-          href: '/dashboard', 
-          icon: LayoutDashboard 
-        },
-        { 
-          id: 'tour-sidebar-tasks',
-          label: 'Daftar Tugas', 
-          href: '/tasks', 
-          icon: CheckSquare 
-        },
-        { 
-          id: 'tour-sidebar-reports',
-          label: 'Laporan & Riwayat', 
-          href: '/reports', 
-          icon: FileSpreadsheet 
-        },
+        { id: 'tour-nav-dashboard', label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+        { id: 'tour-nav-tasks', label: 'Daftar Tugas', href: '/tasks', icon: CheckSquare },
+        { id: 'tour-nav-reports', label: 'Laporan & Riwayat', href: '/reports', icon: FileSpreadsheet },
       ],
     },
     {
       label: 'BANK DATA',
       items: [
-        { label: 'Katalog Tusi', href: '/tusi-catalog', icon: BookOpen },
+        { id: 'tour-nav-tusi', label: 'Katalog Tusi', href: '/tusi-catalog', icon: BookOpen },
         ...(isSuperAdmin ? [
-          { label: 'Katalog Hierarki', href: '/admin/hierarchy-catalog', icon: FolderTree }
+          { id: 'tour-nav-hierarchy', label: 'Katalog Hierarki', href: '/admin/hierarchy-catalog', icon: FolderTree }
         ] : []),
       ],
     },
     ...(hasAdminAccess ? [{
       label: 'ADMINISTRASI',
       items: [
-        { label: 'Verifikasi Pegawai', href: '/admin/approvals', icon: ShieldCheck },
-        { label: 'Pegawai & Role', href: '/admin/users', icon: Users },
-        { label: 'Hierarki Unit', href: '/admin/units', icon: Building2 },
+        { id: 'tour-nav-approvals', label: 'Verifikasi Pegawai', href: '/admin/approvals', icon: ShieldCheck },
+        { id: 'tour-nav-users', label: 'Pegawai & Role', href: '/admin/users', icon: Users },
+        { id: 'tour-nav-units', label: 'Hierarki Unit', href: '/admin/units', icon: Building2 },
       ],
     }] : []),
     {
       label: 'PENGATURAN',
       items: [
-        { label: 'Profil Saya', href: '/profile', icon: User },
+        { id: 'tour-nav-profile', label: 'Profil Saya', href: '/profile', icon: User },
       ],
     },
   ];
 
   return (
-    <aside className="w-64 min-h-screen bg-canvas border-r border-stone-200/60 p-5 flex flex-col justify-between print:hidden">
+    <aside className="w-64 min-h-screen bg-canvas border-r border-stone-200/60 p-5 flex flex-col justify-between print:hidden shrink-0">
       <div className="space-y-6">
-        {/* Logo & Info Aplikasi */}
+        {/* Logo & Info */}
         <div className="flex items-center gap-3 px-2">
           <div className="w-10 h-10 rounded-2xl bg-white border border-stone-200 shadow-sm flex items-center justify-center font-bold text-[#DF3B68]">
             GT
@@ -112,7 +97,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Menu Navigasi Bertarget Tour */}
+        {/* Menu Items */}
         <nav className="space-y-5">
           {menuGroups.map((group) => (
             <div key={group.label} className="space-y-1">
@@ -144,7 +129,7 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* Tombol Logout */}
+      {/* Logout Button */}
       <div className="pt-4 border-t border-stone-200/60">
         <button
           onClick={handleLogout}
