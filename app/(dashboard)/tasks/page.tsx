@@ -1,4 +1,3 @@
-// app/(dashboard)/tasks/page.tsx
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
@@ -81,7 +80,7 @@ function TasksContent() {
   // Role & Multi-Unit State
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [unitList, setUnitList] = useState<UnitOption[]>([]);
-  const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('MY_UNIT');
+  const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL_UNITS');
   const [userUnitId, setUserUnitId] = useState<string>('');
 
   useEffect(() => {
@@ -91,59 +90,82 @@ function TasksContent() {
   }, [searchParams]);
 
   useEffect(() => {
-    initUserAndUnits();
+    initUserAndFetch();
   }, []);
 
   useEffect(() => {
-    if (userUnitId) {
-      fetchTasks();
-    }
-  }, [selectedUnitFilter, userUnitId]);
+    fetchTasks(selectedUnitFilter, userUnitId, isSuperAdmin);
+  }, [selectedUnitFilter]);
 
-  const initUserAndUnits = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('unit_id, role, unit:units(id, name, level)')
-      .eq('id', user.id)
-      .single();
-
-    if (profile) {
-      setUserUnitId(profile.unit_id);
-      const isAdmin = String(profile.role).toUpperCase() === 'SUPER_ADMIN' || (profile.unit as any)?.level === 'ESELON_II';
-      setIsSuperAdmin(isAdmin);
-
-      if (isAdmin) {
-        const { data: units } = await supabase
-          .from('units')
-          .select('id, name, level')
-          .order('name');
-        if (units) setUnitList(units);
+  const initUserAndFetch = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        return;
       }
+
+      // Ambil profil secara defensif
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('unit_id, role')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      let adminFlag = false;
+      let currentUnitId = '';
+
+      if (profile) {
+        currentUnitId = profile.unit_id || '';
+        setUserUnitId(currentUnitId);
+        adminFlag = String(profile.role).toUpperCase() === 'SUPER_ADMIN';
+        setIsSuperAdmin(adminFlag);
+
+        if (adminFlag) {
+          const { data: units } = await supabase
+            .from('units')
+            .select('id, name, level')
+            .order('name');
+          if (units) setUnitList(units);
+          setSelectedUnitFilter('ALL_UNITS');
+        } else {
+          setSelectedUnitFilter('MY_UNIT');
+        }
+      }
+
+      await fetchTasks(adminFlag ? 'ALL_UNITS' : 'MY_UNIT', currentUnitId, adminFlag);
+    } catch (err) {
+      console.error('Inisialisasi user gagal:', err);
+      setLoading(false);
     }
   };
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (filterUnit: string, myUnitId: string, isAdmin: boolean) => {
     setLoading(true);
 
-    let query = supabase
-      .from('tasks')
-      .select('*, unit:units(id, name, level), subtasks(*)')
-      .order('deadline', { ascending: true });
+    try {
+      let query = supabase
+        .from('tasks')
+        .select('*, unit:units(id, name, level), subtasks(*)')
+        .order('deadline', { ascending: true });
 
-    if (selectedUnitFilter === 'MY_UNIT') {
-      query = query.eq('unit_id', userUnitId);
-    } else if (selectedUnitFilter !== 'ALL_UNITS') {
-      query = query.eq('unit_id', selectedUnitFilter);
-    }
+      if (filterUnit === 'MY_UNIT' && myUnitId) {
+        query = query.eq('unit_id', myUnitId);
+      } else if (filterUnit !== 'ALL_UNITS' && filterUnit !== 'MY_UNIT') {
+        query = query.eq('unit_id', filterUnit);
+      }
 
-    const { data, error } = await query;
-    if (!error && data) {
-      setTasks(data as TaskItem[]);
+      const { data, error } = await query;
+      if (!error && data) {
+        setTasks(data as TaskItem[]);
+      } else if (error) {
+        console.error('Fetch tasks query error:', error);
+      }
+    } catch (e) {
+      console.error('Exception on fetchTasks:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const toggleSubtasks = (taskId: string) => {
@@ -159,11 +181,13 @@ function TasksContent() {
   };
 
   const parseSafeDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, (m || 1) - 1, d || 1);
   };
 
   const getDaysDiff = (deadlineStr: string) => {
+    if (!deadlineStr) return 0;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const dDate = parseSafeDate(deadlineStr);
@@ -198,7 +222,7 @@ function TasksContent() {
 
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
-      t.title.toLowerCase().includes(search.toLowerCase()) ||
+      t.title?.toLowerCase().includes(search.toLowerCase()) ||
       (t.unit?.name && t.unit.name.toLowerCase().includes(search.toLowerCase()));
       
     if (!matchesSearch) return false;
@@ -333,8 +357,8 @@ function TasksContent() {
                 onChange={(e) => setSelectedUnitFilter(e.target.value)}
                 className="px-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 text-stone-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
               >
-                <option value="MY_UNIT">Unit Saya Saja</option>
                 <option value="ALL_UNITS">🌐 Seluruh Unit (Regional se-Wilayah)</option>
+                <option value="MY_UNIT">Unit Saya Saja</option>
                 {unitList.map((u) => (
                   <option key={u.id} value={u.id}>
                     [{u.level}] {u.name}
@@ -422,7 +446,6 @@ function TasksContent() {
                         </p>
                       )}
 
-                      {/* Progress Bar (100% Otomatis jika selesai) */}
                       <div className="flex items-center gap-3 pt-1 max-w-xs">
                         <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
                           <div 
@@ -434,9 +457,7 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* Tombol Aksi Kontrol & Link Langsung */}
                     <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
-                      {/* Toggle Hide/Show Deskripsi & Dasar Hukum */}
                       {(task.description || task.legal_basis || hasLegalLink) && (
                         <button
                           type="button"
@@ -453,7 +474,6 @@ function TasksContent() {
                         </button>
                       )}
 
-                      {/* Toggle Sub-pekerjaan */}
                       <button
                         type="button"
                         onClick={() => toggleSubtasks(task.id)}
@@ -468,7 +488,6 @@ function TasksContent() {
                         {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </button>
 
-                      {/* Akses Cepat Link Dasar Hukum jika ada */}
                       {hasLegalLink && (
                         <a
                           href={task.legal_basis_link}
@@ -481,7 +500,6 @@ function TasksContent() {
                         </a>
                       )}
 
-                      {/* Akses Cepat Link Bukti Pekerjaan */}
                       {hasEvidence && (
                         <a
                           href={task.evidence_link}
@@ -494,7 +512,6 @@ function TasksContent() {
                         </a>
                       )}
 
-                      {/* Detail & Kelola Penuh */}
                       <Link
                         href={`/tasks/${task.id}`}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
@@ -505,9 +522,6 @@ function TasksContent() {
                     </div>
                   </div>
 
-                  {/* ========================================================= */}
-                  {/* EXPAND 1: HIDE & SHOW DESKRIPSI & DASAR HUKUM             */}
-                  {/* ========================================================= */}
                   {isDescExpanded && (
                     <div className="px-5 pb-4 pt-1 bg-amber-50/40 border-t border-amber-100 space-y-2 animate-in fade-in duration-150">
                       {task.legal_basis && (
@@ -536,9 +550,6 @@ function TasksContent() {
                     </div>
                   )}
 
-                  {/* ========================================================= */}
-                  {/* EXPAND 2: CHECKLIST SUB-PEKERJAAN BESERTA DEADLINE        */}
-                  {/* ========================================================= */}
                   {isSubExpanded && (
                     <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
                       <div className="space-y-1.5">
