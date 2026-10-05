@@ -33,11 +33,11 @@ export function Sidebar() {
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
       if (data) setProfile(data as Profile);
     }
     getProfile();
-  }, [supabase]);
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -53,9 +53,24 @@ export function Sidebar() {
     {
       label: 'MONITORING',
       items: [
-        { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-        { label: 'Daftar Tugas', href: '/tasks', icon: CheckSquare },
-        { label: 'Laporan & Riwayat', href: '/reports', icon: FileSpreadsheet },
+        { 
+          id: 'tour-sidebar-dashboard',
+          label: 'Dashboard', 
+          href: '/dashboard', 
+          icon: LayoutDashboard 
+        },
+        { 
+          id: 'tour-sidebar-tasks',
+          label: 'Daftar Tugas', 
+          href: '/tasks', 
+          icon: CheckSquare 
+        },
+        { 
+          id: 'tour-sidebar-reports',
+          label: 'Laporan & Riwayat', 
+          href: '/reports', 
+          icon: FileSpreadsheet 
+        },
       ],
     },
     {
@@ -86,9 +101,9 @@ export function Sidebar() {
   return (
     <aside className="w-64 min-h-screen bg-canvas border-r border-stone-200/60 p-5 flex flex-col justify-between print:hidden">
       <div className="space-y-6">
-        {/* Logo & Info */}
+        {/* Logo & Info Aplikasi */}
         <div className="flex items-center gap-3 px-2">
-          <div className="w-10 h-10 rounded-2xl bg-white border border-stone-200 shadow-sm flex items-center justify-center font-bold text-primary">
+          <div className="w-10 h-10 rounded-2xl bg-white border border-stone-200 shadow-sm flex items-center justify-center font-bold text-[#DF3B68]">
             GT
           </div>
           <div>
@@ -97,7 +112,7 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Menu Items */}
+        {/* Menu Navigasi Bertarget Tour */}
         <nav className="space-y-5">
           {menuGroups.map((group) => (
             <div key={group.label} className="space-y-1">
@@ -110,11 +125,12 @@ export function Sidebar() {
                 return (
                   <Link
                     key={item.href}
+                    id={item.id}
                     href={item.href}
                     className={cn(
                       "flex items-center gap-3 px-3.5 py-2.5 rounded-full text-xs font-medium transition-all duration-150",
                       isActive
-                        ? "bg-primary text-white shadow-sm"
+                        ? "bg-[#DF3B68] text-white shadow-sm"
                         : "text-stone-600 hover:bg-stone-200/50 hover:text-stone-900"
                     )}
                   >
@@ -128,7 +144,7 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* Logout Button */}
+      {/* Tombol Logout */}
       <div className="pt-4 border-t border-stone-200/60">
         <button
           onClick={handleLogout}
