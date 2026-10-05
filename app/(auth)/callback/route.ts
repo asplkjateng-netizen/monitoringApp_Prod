@@ -3,10 +3,9 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get('code');
-  const next = searchParams.get('next') || '/dashboard';
-  const verified = searchParams.get('verified');
+  const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get('code');
+  const origin = requestUrl.origin;
 
   if (code) {
     const cookieStore = await cookies();
@@ -24,23 +23,33 @@ export async function GET(request: Request) {
                 cookieStore.set(name, value, options)
               );
             } catch {
-              // Abaikan jika dipanggil dari server component
+              // Diabaikan pada Server Component
             }
           },
         },
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      const redirectUrl = new URL(next, origin);
-      if (verified) {
-        redirectUrl.searchParams.set('verified', 'true');
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (!error && data?.user) {
+      // Periksa status persetujuan profil
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('approval_status, role')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      if (profile?.role === 'SUPER_ADMIN' || profile?.approval_status === 'APPROVED') {
+        return NextResponse.redirect(`${origin}/dashboard`);
+      } else if (profile?.approval_status === 'PENDING') {
+        return NextResponse.redirect(`${origin}/pending`);
+      } else {
+        return NextResponse.redirect(`${origin}/dashboard`);
       }
-      return NextResponse.redirect(redirectUrl.toString());
     }
   }
 
-  // Jika gagal atau kode tidak valid
+  // Jika gagal atau tautan expired
   return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
 }
