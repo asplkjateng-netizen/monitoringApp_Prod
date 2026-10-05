@@ -18,7 +18,8 @@ import {
   Square,
   Layers,
   BookOpen,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Loader2
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -77,6 +78,9 @@ function TasksContent() {
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
   const [expandedDescIds, setExpandedDescIds] = useState<string[]>([]);
 
+  // Subtask Updating State (ID yang sedang diproses)
+  const [updatingSubtaskId, setUpdatingSubtaskId] = useState<string | null>(null);
+
   // Role & Multi-Unit State
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [unitList, setUnitList] = useState<UnitOption[]>([]);
@@ -105,7 +109,6 @@ function TasksContent() {
         return;
       }
 
-      // Ambil profil secara defensif
       const { data: profile } = await supabase
         .from('profiles')
         .select('unit_id, role')
@@ -158,13 +161,64 @@ function TasksContent() {
       const { data, error } = await query;
       if (!error && data) {
         setTasks(data as TaskItem[]);
-      } else if (error) {
-        console.error('Fetch tasks query error:', error);
       }
     } catch (e) {
       console.error('Exception on fetchTasks:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // FUNGSI CENTANG SUB-TUGAS & AUTO-UPDATE PROGRES
+  const handleToggleSubtask = async (subtaskId: string, currentStatus: boolean, taskId: string) => {
+    setUpdatingSubtaskId(subtaskId);
+    const newStatus = !currentStatus;
+
+    // 1. Update lokal instan (Optimistic UI)
+    setTasks((prevTasks) =>
+      prevTasks.map((task) => {
+        if (task.id !== taskId) return task;
+
+        const updatedSubtasks = (task.subtasks || []).map((st) =>
+          st.id === subtaskId ? { ...st, is_completed: newStatus } : st
+        );
+
+        const total = updatedSubtasks.length;
+        const completed = updatedSubtasks.filter((st) => st.is_completed).length;
+        const calculatedPct = total > 0 ? Math.round((completed / total) * 100) : task.progress_pct;
+
+        let derivedStatus: TaskItem['status'] = task.status;
+        if (task.status !== 'TERKENDALA') {
+          if (calculatedPct === 100) derivedStatus = 'SELESAI';
+          else if (calculatedPct > 0) derivedStatus = 'ON_PROGRESS';
+          else derivedStatus = 'BELUM_DIKERJAKAN';
+        }
+
+        return {
+          ...task,
+          subtasks: updatedSubtasks,
+          progress_pct: calculatedPct,
+          status: derivedStatus,
+        };
+      })
+    );
+
+    // 2. Simpan ke database Supabase (Trigger DB akan mengupdate progress tasks secara otomatis)
+    try {
+      const { error } = await supabase
+        .from('subtasks')
+        .update({ is_completed: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', subtaskId);
+
+      if (error) {
+        console.error('Gagal memperbarui sub-tugas:', error);
+        // Jika gagal, sinkronkan ulang data dari server
+        fetchTasks(selectedUnitFilter, userUnitId, isSuperAdmin);
+      }
+    } catch (err) {
+      console.error('Error saat update subtask:', err);
+    } finally {
+      setUpdatingSubtaskId(null);
     }
   };
 
@@ -550,19 +604,20 @@ function TasksContent() {
                     </div>
                   )}
 
+                  {/* CHECKLIST SUB-PEKERJAAN INTERAKTIF */}
                   {isSubExpanded && (
                     <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
-                            <span>Tahapan Sub-Pekerjaan & Batas Waktu:</span>
+                            <span>Tahapan Sub-Pekerjaan (Klik untuk mengubah progres):</span>
                           </p>
                           <Link
                             href={`/tasks/${task.id}`}
                             className="text-[11px] text-[#DF3B68] hover:underline font-semibold"
                           >
-                            + Tambah / Edit Sub-tugas
+                            + Kelola Detail Sub-tugas
                           </Link>
                         </div>
 
@@ -572,33 +627,43 @@ function TasksContent() {
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {task.subtasks.map((st, idx) => (
-                              <div
-                                key={st.id || idx}
-                                className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-colors ${
-                                  st.is_completed
-                                    ? 'bg-emerald-50/60 border-emerald-200 text-emerald-800'
-                                    : 'bg-white border-stone-200 text-stone-700'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 truncate">
-                                  {st.is_completed ? (
-                                    <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
-                                  ) : (
-                                    <Square className="w-4 h-4 text-stone-400 shrink-0" />
-                                  )}
-                                  <span className={`truncate ${st.is_completed ? 'line-through text-stone-400 font-medium' : 'font-medium'}`}>
-                                    {idx + 1}. {st.title}
-                                  </span>
-                                </div>
+                            {task.subtasks.map((st, idx) => {
+                              const isUpdating = updatingSubtaskId === st.id;
 
-                                {st.deadline && (
-                                  <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200" title="Batas waktu tahapan ini">
-                                    Batas: {st.deadline}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
+                              return (
+                                <button
+                                  type="button"
+                                  key={st.id || idx}
+                                  disabled={isUpdating}
+                                  onClick={() => handleToggleSubtask(st.id, st.is_completed, task.id)}
+                                  className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all text-left group cursor-pointer ${
+                                    st.is_completed
+                                      ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900 shadow-2xs hover:bg-emerald-100/70'
+                                      : 'bg-white border-stone-200 text-stone-800 hover:border-[#DF3B68]/40 hover:bg-rose-50/30'
+                                  }`}
+                                  title="Klik untuk menyelesaikan/membatalkan sub-tugas ini"
+                                >
+                                  <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+                                    {isUpdating ? (
+                                      <Loader2 className="w-4 h-4 text-[#DF3B68] animate-spin shrink-0" />
+                                    ) : st.is_completed ? (
+                                      <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0 group-hover:scale-110 transition-transform" />
+                                    ) : (
+                                      <Square className="w-4 h-4 text-stone-400 shrink-0 group-hover:text-[#DF3B68] group-hover:scale-110 transition-transform" />
+                                    )}
+                                    <span className={`truncate font-medium ${st.is_completed ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                                      {idx + 1}. {st.title}
+                                    </span>
+                                  </div>
+
+                                  {st.deadline && (
+                                    <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
+                                      Batas: {st.deadline}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
