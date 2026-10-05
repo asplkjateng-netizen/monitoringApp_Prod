@@ -3,7 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle2, FileText, Users, AlertCircle, Save, Loader2, Link as LinkIcon } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  CheckCircle2, 
+  FileText, 
+  Users, 
+  AlertCircle, 
+  Save, 
+  Loader2, 
+  Link as LinkIcon, 
+  BellRing, 
+  Tag 
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,12 +31,14 @@ export default function EditTaskPage() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
   const [legalBasis, setLegalBasis] = useState('');
   const [legalBasisLink, setLegalBasisLink] = useState('');
   const [periodType, setPeriodType] = useState<string>('BULANAN');
   const [periodMonth, setPeriodMonth] = useState<number>(1);
-  const [periodYear, setPeriodYear] = useState<number>(2026);
+  const [periodYear, setPeriodYear] = useState<number>(new Date().getFullYear());
   const [deadline, setDeadline] = useState('');
+  const [criticalDaysThreshold, setCriticalDaysThreshold] = useState<number>(3);
   const [priority, setPriority] = useState<string>('SEDANG');
 
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -52,12 +65,14 @@ export default function EditTaskPage() {
 
     setTitle(task.title);
     setDescription(task.description || '');
+    setCategory(task.category || 'TUSI');
     setLegalBasis(task.legal_basis || '');
     setLegalBasisLink(task.legal_basis_link || '');
     setPeriodType(task.period_type);
     setPeriodMonth(task.period_month || 1);
     setPeriodYear(task.period_year);
     setDeadline(task.deadline);
+    setCriticalDaysThreshold(task.critical_days_threshold || 3);
     setPriority(task.priority);
 
     const { data: staff } = await supabase
@@ -100,18 +115,19 @@ export default function EditTaskPage() {
       
       const previousPicIds = (existingPicsData || []).map((p) => p.user_id);
 
-      // Simpan pembaruan data tugas pokok termasuk link dasar hukum
       const { error: taskError } = await supabase
         .from('tasks')
         .update({
           title: title.trim(),
           description: description.trim() || null,
+          category,
           legal_basis: legalBasis.trim() || null,
           legal_basis_link: legalBasisLink.trim() || null,
           period_type: periodType as any,
           period_month: periodMonth,
           period_year: periodYear,
           deadline,
+          critical_days_threshold: Number(criticalDaysThreshold) || 3,
           priority: priority as any,
           updated_at: new Date().toISOString(),
         })
@@ -165,7 +181,7 @@ export default function EditTaskPage() {
         </Link>
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Edit Rincian Tugas</h1>
-          <p className="text-xs text-stone-500 mt-0.5">Perbarui rincian tugas pokok, regulasi & link dasar hukum, serta PIC pelaksana.</p>
+          <p className="text-xs text-stone-500 mt-0.5">Perbarui rincian tugas pokok, jenis tugas, masa kritis, serta PIC pelaksana.</p>
         </div>
       </div>
 
@@ -184,6 +200,37 @@ export default function EditTaskPage() {
           </div>
 
           <div className="space-y-4">
+            {/* 1. Klasifikasi Jenis Tugas */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Jenis Pekerjaan *</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {[
+                  { id: 'TUSI', label: 'Tusi Pokok', desc: 'Sesuai regulasi & tusi unit' },
+                  { id: 'TAMBAHAN', label: 'Tugas Tambahan', desc: 'Penugasan khusus / Pokja' },
+                  { id: 'IMPROVISASI', label: 'Improvisasi', desc: 'Inovasi mandiri penunjang kerja' },
+                ].map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => setCategory(item.id as any)}
+                    className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                      category === item.id
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-stone-900 font-bold'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>{item.label}</span>
+                      <div className={`w-3.5 h-3.5 rounded-full border ${category === item.id ? 'border-[#DF3B68] bg-[#DF3B68]' : 'border-stone-300'}`} />
+                    </div>
+                    <p className="text-[10px] text-stone-400 font-normal mt-0.5">{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <Input
               label="Judul / Uraian Tugas *"
               value={title}
@@ -230,7 +277,8 @@ export default function EditTaskPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+          {/* Konfigurasi Tenggat & Masa Kritis */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
             <div>
               <label className="block text-xs font-semibold text-stone-600 mb-1">Tipe Periode</label>
               <select
@@ -247,7 +295,7 @@ export default function EditTaskPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1">Periode Bulan & Tahun</label>
+              <label className="block text-xs font-semibold text-stone-600 mb-1">Bulan & Tahun Periode</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -275,6 +323,25 @@ export default function EditTaskPage() {
                 required
                 className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-mono font-medium"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-stone-600 mb-1 flex items-center gap-1">
+                <BellRing className="w-3 h-3 text-[#DF3B68]" /> Masa Kritis (H-X) *
+              </label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-stone-500 font-bold">H-</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={criticalDaysThreshold}
+                  onChange={(e) => setCriticalDaysThreshold(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-bold text-rose-700"
+                  title="Peringatan dini (warna kritis & notif WA) akan aktif H-X sebelum batas akhir"
+                />
+                <span className="text-[11px] text-stone-400">hari</span>
+              </div>
             </div>
           </div>
         </div>
