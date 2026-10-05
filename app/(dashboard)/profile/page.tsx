@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { 
   User, 
-  ShieldCheck, 
   Building2, 
   KeyRound, 
   CheckCircle2, 
@@ -58,40 +57,42 @@ export default function ProfilePage() {
     if (user) {
       setEmail(user.email || '');
 
-      const { data, error } = await supabase
+      // Ambil data profil inti secara mandiri
+      const { data: profData, error } = await supabase
         .from('profiles')
-        .select(`
-          id,
-          full_name,
-          nip,
-          employment_status,
-          role,
-          approval_status,
-          unit:units (
-            id,
-            name,
-            code,
-            level,
-            parent_id
-          )
-        `)
+        .select('id, full_name, nip, employment_status, role, approval_status, unit_id')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (!error && data) {
-        const profData = data as any;
-        setProfile(profData);
-        setFullName(profData.full_name);
+      if (!error && profData) {
+        setFullName(profData.full_name || '');
 
-        // Fetch parent unit (misal KPPN induk jika user berada di Seksi)
-        if (profData.unit?.parent_id) {
-          const { data: parent } = await supabase
+        let unitObj = null;
+        if (profData.unit_id) {
+          const { data: uData } = await supabase
             .from('units')
-            .select('name')
-            .eq('id', profData.unit.parent_id)
-            .single();
-          if (parent) setParentUnitName(parent.name);
+            .select('id, name, code, level, parent_id')
+            .eq('id', profData.unit_id)
+            .maybeSingle();
+
+          if (uData) {
+            unitObj = uData;
+            // Ambil nama unit induk jika ada
+            if (uData.parent_id) {
+              const { data: parent } = await supabase
+                .from('units')
+                .select('name')
+                .eq('id', uData.parent_id)
+                .maybeSingle();
+              if (parent) setParentUnitName(parent.name);
+            }
+          }
         }
+
+        setProfile({
+          ...profData,
+          unit: unitObj
+        });
       }
     }
     setLoading(false);
@@ -117,6 +118,7 @@ export default function ProfilePage() {
 
     if (!error) {
       setNameSuccess(true);
+      setProfile((prev) => prev ? { ...prev, full_name: fullName.trim() } : null);
       setTimeout(() => setNameSuccess(false), 3000);
     }
     setIsUpdatingName(false);
@@ -171,7 +173,7 @@ export default function ProfilePage() {
           </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-stone-900">{profile?.full_name}</h2>
+              <h2 className="text-lg font-bold text-stone-900">{profile?.full_name || 'Nama Belum Diisi'}</h2>
               {profile?.approval_status === 'APPROVED' && (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
                   <BadgeCheck className="w-3.5 h-3.5" /> Terverifikasi
@@ -185,10 +187,10 @@ export default function ProfilePage() {
 
         <div className="flex flex-wrap gap-2 text-xs">
           <div className="px-3 py-1.5 rounded-xl bg-stone-100 text-stone-700 font-medium">
-            Role: <span className="font-bold">{profile?.role}</span>
+            Role: <span className="font-bold text-[#DF3B68]">{profile?.role || 'STAF'}</span>
           </div>
           <div className="px-3 py-1.5 rounded-xl bg-stone-100 text-stone-700 font-medium">
-            Status: <span className="font-bold">{profile?.employment_status}</span>
+            Status: <span className="font-bold">{profile?.employment_status || '-'}</span>
           </div>
         </div>
       </div>
@@ -196,7 +198,6 @@ export default function ProfilePage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Kolom Kiri: Penempatan Unit & Edit Nama */}
         <div className="space-y-6">
-          {/* Card Penempatan Unit */}
           <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm border-b border-stone-100 pb-3">
               <Building2 className="w-4 h-4 text-[#DF3B68]" />
@@ -217,7 +218,6 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Card Edit Nama Lengkap */}
           <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-4">
             <div className="flex items-center gap-2 text-stone-900 font-bold text-sm border-b border-stone-100 pb-3">
               <User className="w-4 h-4 text-[#DF3B68]" />
