@@ -9,26 +9,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { PeriodType } from '@/types/database.types';
 
-// Daftar standar Rumpun Tusi gabungan Kanwil dan KPPN
-const DEFAULT_TUSI_OPTIONS = [
-  'ASPLK',
-  'PPA I',
-  'PPA II',
-  'SKKI',
-  'MSKI',
-  'PD',
-  'BANK',
-  'VERA',
-  'UMUM'
-];
-
 export default function NewTusiPage() {
   const router = useRouter();
   const supabase = createClient();
 
   const [title, setTitle] = useState('');
-  const [tusiType, setTusiType] = useState('ASPLK');
-  const [availableTusiList, setAvailableTusiList] = useState<string[]>(DEFAULT_TUSI_OPTIONS);
+  const [tusiType, setTusiType] = useState('');
+  const [availableTusiList, setAvailableTusiList] = useState<string[]>([]);
   const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
   const [periodType, setPeriodType] = useState<PeriodType>('TRIWULANAN');
   const [description, setDescription] = useState('');
@@ -42,31 +29,66 @@ export default function NewTusiPage() {
   const [isRecurring, setIsRecurring] = useState<boolean>(true);
 
   const [loading, setLoading] = useState(false);
+  const [fetchingHierarchy, setFetchingHierarchy] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Muat identitas profil & unit pengguna untuk auto-select Rumpun Tusi
   useEffect(() => {
-    loadUserUnitTusi();
+    loadHierarchyAndProfile();
   }, []);
 
-  const loadUserUnitTusi = async () => {
+  const loadHierarchyAndProfile = async () => {
+    setFetchingHierarchy(true);
     try {
+      // 1. Ambil data user yang sedang login
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      let userUnitTusi = '';
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('unit_id, unit:units(id, name, tusi_type)')
-        .eq('id', user.id)
-        .single();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('unit_id, unit:units(id, name, tusi_type)')
+          .eq('id', user.id)
+          .maybeSingle();
 
-      if (profile && (profile.unit as any)?.tusi_type) {
-        const userTusi = String((profile.unit as any).tusi_type).trim().toUpperCase();
-        setTusiType(userTusi);
-        setAvailableTusiList((prev) => Array.from(new Set([userTusi, ...prev])));
+        if (profile && (profile.unit as any)?.tusi_type) {
+          userUnitTusi = String((profile.unit as any).tusi_type).trim().toUpperCase();
+        }
       }
-    } catch (err) {
-      console.error('Gagal memuat tusi profil:', err);
+
+      // 2. Ambil seluruh rumpun Tusi unik dari unit tingkat terkecil (SEKSI / Subbag)
+      const { data: seksiUnits, error: unitError } = await supabase
+        .from('units')
+        .select('tusi_type')
+        .eq('level', 'SEKSI')
+        .not('tusi_type', 'is', null);
+
+      if (unitError) throw unitError;
+
+      // Deduplikasi & urutkan alfabetis
+      const distinctTusi = Array.from(
+        new Set(
+          (seksiUnits || [])
+            .map((u) => u.tusi_type?.trim().toUpperCase())
+            .filter(Boolean) as string[]
+        )
+      ).sort();
+
+      setAvailableTusiList(distinctTusi);
+
+      // Default: gunakan tusi user jika ada dalam daftar, jika tidak gunakan tusi pertama
+      if (userUnitTusi && distinctTusi.includes(userUnitTusi)) {
+        setTusiType(userUnitTusi);
+      } else if (distinctTusi.length > 0) {
+        setTusiType(distinctTusi[0]);
+      } else if (userUnitTusi) {
+        setTusiType(userUnitTusi);
+        setAvailableTusiList([userUnitTusi]);
+      }
+    } catch (err: any) {
+      console.error('Gagal memuat hirarki tusi unit:', err.message);
+      setErrorMsg('Gagal memuat daftar seksi hirarki. Pastikan unit tingkat SEKSI sudah didaftarkan.');
+    } finally {
+      setFetchingHierarchy(false);
     }
   };
 
@@ -99,6 +121,12 @@ export default function NewTusiPage() {
     setLoading(true);
     setErrorMsg('');
 
+    if (!tusiType) {
+      setErrorMsg('Rumpun Tusi wajib dipilih.');
+      setLoading(false);
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     const { data: profile } = await supabase
       .from('profiles')
@@ -121,7 +149,7 @@ export default function NewTusiPage() {
       .maybeSingle();
 
     if (existingTpl) {
-      setErrorMsg(`Master Tusi dengan judul "${title.trim()}" pada seksi ${tusiType} sudah ada. Silakan edit dari katalog.`);
+      setErrorMsg(`Master Tusi "${title.trim()}" untuk rumpun ${tusiType} sudah terdaftar. Silakan gunakan atau edit yang sudah ada.`);
       setLoading(false);
       return;
     }
@@ -212,21 +240,36 @@ export default function NewTusiPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-stone-600 mb-1 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
-                <span>Rumpun Tusi *</span>
+              <label className="block text-xs font-semibold text-stone-600 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
+                  <span>Rumpun Tusi (Level Seksi) *</span>
+                </span>
+                <span className="text-[10px] text-stone-400">Dari Hierarki</span>
               </label>
-              <select
-                className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
-                value={tusiType}
-                onChange={(e) => setTusiType(e.target.value)}
-              >
-                {availableTusiList.map((t) => (
-                  <option key={t} value={t}>
-                    {t} {t === 'ASPLK' ? '⭐ (Kanwil Akuntansi)' : ''}
-                  </option>
-                ))}
-              </select>
+
+              {fetchingHierarchy ? (
+                <div className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-stone-50 text-xs text-stone-400">
+                  Memuat seksi hierarki...
+                </div>
+              ) : (
+                <select
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-bold text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  value={tusiType}
+                  onChange={(e) => setTusiType(e.target.value)}
+                  required
+                >
+                  {availableTusiList.length === 0 ? (
+                    <option value="">-- Belum ada seksi di hierarki --</option>
+                  ) : (
+                    availableTusiList.map((t) => (
+                      <option key={t} value={t}>
+                        Seksi {t}
+                      </option>
+                    ))
+                  )}
+                </select>
+              )}
             </div>
 
             <div>
@@ -366,7 +409,12 @@ export default function NewTusiPage() {
           </div>
 
           <div className="pt-2">
-            <Button type="submit" isLoading={loading} className="w-full bg-[#DF3B68] hover:bg-[#C72F58] text-white">
+            <Button 
+              type="submit" 
+              isLoading={loading} 
+              disabled={fetchingHierarchy || availableTusiList.length === 0}
+              className="w-full bg-[#DF3B68] hover:bg-[#C72F58] text-white"
+            >
               Simpan Master Tusi
             </Button>
           </div>
