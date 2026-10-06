@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -14,15 +14,16 @@ import {
   AlertCircle, 
   BookmarkPlus, 
   Clock, 
-  Calendar,
-  Radio,
-  Search,
-  UserX,
-  UserCheck,
-  Building,
-  Link as LinkIcon,
-  Tag,
-  BellRing
+  Calendar, 
+  Radio, 
+  Search, 
+  UserX, 
+  UserCheck, 
+  Building, 
+  Link as LinkIcon, 
+  Tag, 
+  BellRing,
+  RotateCw
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ interface StaffProfile {
 
 interface TaskTemplate {
   id: string;
+  tusi_type: string;
   title: string;
   category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   description: string | null;
@@ -52,6 +54,7 @@ interface TaskTemplate {
   deadline_rule?: string;
   exact_day?: number;
   critical_days_threshold?: number;
+  is_recurring?: boolean;
 }
 
 interface SubtaskDraft {
@@ -72,8 +75,6 @@ export default function NewTaskPage() {
   const [unitId, setUnitId] = useState<string | null>(null);
   const [userUnitInfo, setUserUnitInfo] = useState<any>(null);
   const [userTusiType, setUserTusiType] = useState<string>('UMUM');
-  
-  const [canBroadcast, setCanBroadcast] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   // Sumber data pendukung
@@ -82,8 +83,9 @@ export default function NewTaskPage() {
 
   // State Form Pokok
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(true);
+  const [saveAsTemplate, setSaveAsTemplate] = useState<boolean>(false);
   const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
+  const [isClericalRecurring, setIsClericalRecurring] = useState<boolean>(true); // Klerikal (Auto-Generate) vs Non-Klerikal
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [legalBasis, setLegalBasis] = useState('');
@@ -122,6 +124,13 @@ export default function NewTaskPage() {
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  // Jika periode INSIDENTIL, otomatis non-klerikal (tidak auto-generate periodik)
+  useEffect(() => {
+    if (periodType === 'INSIDENTIL') {
+      setIsClericalRecurring(false);
+    }
+  }, [periodType]);
 
   useEffect(() => {
     if (periodType !== 'INSIDENTIL' && deadlineMode === 'FORMULA') {
@@ -236,8 +245,8 @@ export default function NewTaskPage() {
       setUserTusiType(tusi);
 
       const roleUpper = String(profile?.role || 'STAF').toUpperCase();
-      setIsSuperAdmin(roleUpper === 'SUPER_ADMIN');
-      setCanBroadcast(true);
+      const adminStatus = roleUpper === 'SUPER_ADMIN';
+      setIsSuperAdmin(adminStatus);
 
       let loadedStaff: StaffProfile[] = [];
       if (targetUnitId) {
@@ -264,18 +273,32 @@ export default function NewTaskPage() {
       setStaffList(loadedStaff);
       setSelectedPics([user.id]);
 
-      const { data: tpl } = await supabase
-        .from('task_templates')
-        .select('*')
-        .order('title', { ascending: true });
+      // Query template dengan scoping seksi pengguna jika bukan super admin
+      let tplQuery = supabase.from('task_templates').select('*').order('title', { ascending: true });
+      if (!adminStatus && tusi && tusi !== 'UMUM') {
+        tplQuery = tplQuery.eq('tusi_type', tusi);
+      }
 
+      const { data: tpl } = await tplQuery;
       if (tpl) setTemplates(tpl as TaskTemplate[]);
     } catch (err: any) {
-      console.error('Error initializing form:', err);
+      console.error('Error inisialisasi formulir:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  // Deduplikasi tampilan Master Tusi di dropdown (mencegah judul ganda berulang)
+  const deduplicatedTemplates = useMemo(() => {
+    const map = new Map<string, TaskTemplate>();
+    for (const t of templates) {
+      const normalizedKey = `${t.title.trim().toLowerCase()}_${t.period_type}_${t.category || 'TUSI'}`;
+      if (!map.has(normalizedKey)) {
+        map.set(normalizedKey, t);
+      }
+    }
+    return Array.from(map.values());
+  }, [templates]);
 
   const loadBroadcastStaff = async (scope: 'SEKSI' | 'KANTOR' | 'WILAYAH') => {
     setLoadingBroadcastStaff(true);
@@ -313,7 +336,7 @@ export default function NewTaskPage() {
         setBroadcastStaffList(staffList);
       }
     } catch (err) {
-      console.error('Error loading broadcast staff:', err);
+      console.error('Error broadcast staff:', err);
       setBroadcastStaffList(staffList);
     } finally {
       setLoadingBroadcastStaff(false);
@@ -323,7 +346,7 @@ export default function NewTaskPage() {
   const handleSelectTemplate = (templateId: string) => {
     setSelectedTemplateId(templateId);
     if (!templateId) {
-      setSaveAsTemplate(true);
+      setSaveAsTemplate(false);
       return;
     }
 
@@ -336,6 +359,7 @@ export default function NewTaskPage() {
       setLegalBasis(tpl.legal_basis || '');
       setLegalBasisLink(tpl.legal_basis_link || '');
       setPeriodType(tpl.period_type);
+      setIsClericalRecurring(tpl.is_recurring ?? (tpl.period_type !== 'INSIDENTIL'));
       if (tpl.critical_days_threshold) setCriticalDaysThreshold(tpl.critical_days_threshold);
       if (tpl.deadline_rule) setDeadlineRule(tpl.deadline_rule as any);
       if (tpl.exact_day) {
@@ -434,28 +458,39 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // 1. Simpan Master Tusi jika dicentang
+      // 1. Simpan Master Tusi DENGAN CEK DUPLIKASI
       if (saveAsTemplate && !createdTemplateId) {
-        const { data: newTpl } = await supabase
+        const { data: existingTpl } = await supabase
           .from('task_templates')
-          .insert({
-            tusi_type: userTusiType,
-            title: title.trim(),
-            category,
-            description: description.trim() || null,
-            legal_basis: legalBasis.trim() || null,
-            legal_basis_link: legalBasisLink.trim() || null,
-            period_type: periodType,
-            deadline_rule: deadlineMode === 'CUSTOM' || periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
-            exact_day: exactDay,
-            critical_days_threshold: Number(criticalDaysThreshold) || 3,
-            is_recurring: periodType !== 'INSIDENTIL',
-            created_by_unit: activeUnitId
-          })
           .select('id')
-          .single();
+          .ilike('title', title.trim())
+          .eq('tusi_type', userTusiType)
+          .maybeSingle();
 
-        if (newTpl) createdTemplateId = newTpl.id;
+        if (existingTpl) {
+          createdTemplateId = existingTpl.id;
+        } else {
+          const { data: newTpl } = await supabase
+            .from('task_templates')
+            .insert({
+              tusi_type: userTusiType,
+              title: title.trim(),
+              category,
+              description: description.trim() || null,
+              legal_basis: legalBasis.trim() || null,
+              legal_basis_link: legalBasisLink.trim() || null,
+              period_type: periodType,
+              deadline_rule: deadlineMode === 'CUSTOM' || periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
+              exact_day: exactDay,
+              critical_days_threshold: Number(criticalDaysThreshold) || 3,
+              is_recurring: periodType !== 'INSIDENTIL' && isClericalRecurring,
+              created_by_unit: activeUnitId
+            })
+            .select('id')
+            .single();
+
+          if (newTpl) createdTemplateId = newTpl.id;
+        }
       }
 
       // 2. Simpan Tugas Utama
@@ -488,7 +523,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan PIC Pelaksana
+      // 3. Simpan PIC Pelaksana & Notifikasi In-App
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -543,7 +578,7 @@ export default function NewTaskPage() {
   );
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3">
         <Link
           href="/tasks"
@@ -567,21 +602,27 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Template Selector */}
+        {/* Template Selector dengan Deduplikasi */}
         <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
-          <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
-            <Sparkles className="w-4 h-4 text-[#DF3B68]" />
-            <span>Pilih dari Master Bank Tusi (Opsional)</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
+              <Sparkles className="w-4 h-4 text-[#DF3B68]" />
+              <span>Pilih dari Master Bank Tusi (Opsional)</span>
+            </div>
+            <span className="text-[11px] text-stone-400">
+              Lingkup Seksi: <strong className="text-stone-700">{userTusiType}</strong>
+            </span>
           </div>
+
           <select
             value={selectedTemplateId}
             onChange={(e) => handleSelectTemplate(e.target.value)}
             className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-stone-50/50 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
           >
             <option value="">-- Buat Tugas Mandiri Baru --</option>
-            {templates.map((tpl) => (
+            {deduplicatedTemplates.map((tpl) => (
               <option key={tpl.id} value={tpl.id}>
-                {tpl.title} ({tpl.category || 'TUSI'} - {tpl.period_type})
+                {tpl.title} ({tpl.category || 'TUSI'} - {tpl.period_type}) {tpl.is_recurring ? '• 🤖 Auto-Cycle' : ''}
               </option>
             ))}
           </select>
@@ -617,7 +658,7 @@ export default function NewTaskPage() {
           </div>
 
           <div className="space-y-4">
-            {/* 1. Klasifikasi Jenis Pekerjaan (Tusi / Tambahan / Improvisasi) */}
+            {/* Klasifikasi Jenis Pekerjaan */}
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5 text-[#DF3B68]" />
@@ -696,8 +737,49 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* Konfigurasi Siklus & Tenggat Fleksibel */}
+          {/* SIKLUS, SIFAT PEKERJAAN (KLERIKAL vs NON-KLERIKAL) & TENGGAT */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
+            
+            {/* Sakelar Sifat Pekerjaan Klerikal (Auto-Generate Tiap Periode) */}
+            <div className="p-3.5 bg-white rounded-xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                  <RotateCw className="w-3.5 h-3.5 text-[#DF3B68]" />
+                  <span>Sifat Tugas & Otomasi Periode (Klerikal vs Non-Klerikal)</span>
+                </div>
+                <p className="text-[11px] text-stone-500 mt-0.5">
+                  Tugas klerikal rutin akan digenerate otomatis oleh cron setiap awal siklus. Tugas non-klerikal tidak akan digenerate otomatis.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={periodType === 'INSIDENTIL'}
+                  onClick={() => setIsClericalRecurring(true)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    isClericalRecurring && periodType !== 'INSIDENTIL'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200 disabled:opacity-40'
+                  }`}
+                >
+                  <span>🤖 Klerikal (Auto-Generate)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsClericalRecurring(false)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    !isClericalRecurring || periodType === 'INSIDENTIL'
+                      ? 'bg-stone-800 text-white shadow-xs'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  }`}
+                >
+                  <span>✋ Non-Klerikal (Manual)</span>
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-stone-700 mb-1">Jenis Siklus Pekerjaan *</label>
@@ -707,10 +789,10 @@ export default function NewTaskPage() {
                   className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
                 >
                   <option value="TRIWULANAN">Triwulanan (TW I s.d. TW IV)</option>
-                  <option value="BULANAN">Bulanan (Klerikal Rutin)</option>
+                  <option value="BULANAN">Bulanan (Rutin)</option>
                   <option value="SEMESTERAN">Semesteran (Semester I & II)</option>
                   <option value="TAHUNAN">Tahunan</option>
-                  <option value="INSIDENTIL">Insidentil (Ad-Hoc / Sekali Jalan)</option>
+                  <option value="INSIDENTIL">Insidentil (Ad-Hoc / Non-Klerikal)</option>
                 </select>
               </div>
 
@@ -886,7 +968,7 @@ export default function NewTaskPage() {
                       className="w-full sm:w-64 px-3 py-2 rounded-xl border border-stone-200 bg-stone-50 text-xs font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
                     />
                     <p className="text-[11px] text-stone-400">
-                      Contoh: Tugas Semester 1 yang baru jatuh tempo di bulan Oktober dapat langsung dipilih tanggalnya di atas.
+                      Contoh: Tugas Semester 1 yang baru jatuh tempo di bulan Oktober dapat langsung ditentukan tanggalnya di sini.
                     </p>
                   </div>
                 )}
@@ -901,14 +983,14 @@ export default function NewTaskPage() {
 
           {/* Konfigurasi Ambang Masa Kritis & Prioritas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-            {/* 1. Pengaturan Ambang Masa Kritis (H-X) */}
+            {/* Peringatan Masa Kritis (H-X) */}
             <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
               <label className="block text-xs font-bold text-stone-800 flex items-center gap-1.5">
                 <BellRing className="w-4 h-4 text-[#DF3B68]" />
-                <span>Peringatan Masa Kritis (H-X) *</span>
+                <span>Peringatan Masa Kritis & WhatsApp (H-X) *</span>
               </label>
               <p className="text-[11px] text-stone-500">
-                Sistem akan memunculkan lencana kritis & mengirimkan notifikasi WA mulai H- berapa sebelum deadline:
+                Pesan WA & lencana kritis akan aktif mulai H- berapa sebelum deadline:
               </p>
               
               <div className="flex items-center gap-2 pt-1">
@@ -942,7 +1024,7 @@ export default function NewTaskPage() {
               </div>
             </div>
 
-            {/* 2. Tingkat Prioritas */}
+            {/* Tingkat Prioritas */}
             <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
               <label className="block text-xs font-bold text-stone-800">Tingkat Prioritas Tugas</label>
               <p className="text-[11px] text-stone-500">Klasifikasikan tingkat urgensi penyelesaian pekerjaan:</p>
@@ -1179,7 +1261,7 @@ export default function NewTaskPage() {
           )}
         </div>
 
-        {/* SUBTASKS DENGAN PENGATURAN DEADLINE OPSIONAL */}
+        {/* SUBTASKS DENGAN DEADLINE OPSIONAL */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
@@ -1188,7 +1270,7 @@ export default function NewTaskPage() {
                 <span>Tahapan Sub-Pekerjaan Awal & Batas Waktu (Opsional)</span>
               </div>
               <p className="text-[11px] text-stone-500 mt-0.5">
-                Batas waktu sub-tugas bersifat opsional dan tidak boleh melampaui tenggat tugas utama ({deadline || 'belum ditentukan'}).
+                Batas waktu sub-tugas opsional dan tidak boleh melampaui tenggat tugas utama ({deadline || 'belum ditentukan'}).
               </p>
             </div>
             <button
@@ -1219,7 +1301,6 @@ export default function NewTaskPage() {
                     value={st.deadline || ''}
                     onChange={(e) => handleSubtaskDeadlineChange(idx, e.target.value)}
                     className="px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white text-xs font-mono"
-                    title="Tenggat sub-tugas (opsional, tidak boleh melampaui batas tugas utama)"
                   />
                   {subtasks.length > 1 && (
                     <button
