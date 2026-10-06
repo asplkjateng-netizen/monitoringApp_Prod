@@ -15,8 +15,9 @@ import {
   X, 
   AlertCircle,
   Clock,
-  Building2,
-  Sparkles
+  RotateCw,
+  Sparkles,
+  Layers
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,11 +28,13 @@ interface TemplateItem {
   id: string;
   tusi_type: string;
   title: string;
+  category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   description: string | null;
   legal_basis: string | null;
   period_type: PeriodType;
   deadline_rule?: string | null;
   exact_day?: number | null;
+  critical_days_threshold?: number;
   is_recurring?: boolean;
   created_by_unit: string;
   created_at: string;
@@ -55,6 +58,7 @@ export default function TusiCatalogPage() {
   const [cloningId, setCloningId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
 
   // Modal Edit State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -62,6 +66,8 @@ export default function TusiCatalogPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editTusiType, setEditTusiType] = useState('ASPLK');
+  const [editCategory, setEditCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
+  const [editIsRecurring, setEditIsRecurring] = useState(true);
   const [editPeriodType, setEditPeriodType] = useState<PeriodType>('BULANAN');
   const [editDeadlineRule, setEditDeadlineRule] = useState('NEXT_MONTH_DATE');
   const [editExactDay, setEditExactDay] = useState(15);
@@ -120,6 +126,8 @@ export default function TusiCatalogPage() {
     setEditingTemplateId(template.id);
     setEditTitle(template.title);
     setEditTusiType(template.tusi_type || 'ASPLK');
+    setEditCategory(template.category || 'TUSI');
+    setEditIsRecurring(template.is_recurring ?? (template.period_type !== 'INSIDENTIL'));
     setEditPeriodType(template.period_type || 'BULANAN');
     setEditDeadlineRule(template.deadline_rule || 'NEXT_MONTH_DATE');
     const day = template.exact_day || 15;
@@ -148,6 +156,8 @@ export default function TusiCatalogPage() {
       .update({
         title: editTitle.trim(),
         tusi_type: editTusiType.trim().toUpperCase(),
+        category: editCategory,
+        is_recurring: editPeriodType !== 'INSIDENTIL' && editIsRecurring,
         period_type: editPeriodType,
         deadline_rule: editPeriodType === 'INSIDENTIL' ? 'MANUAL' : editDeadlineRule,
         exact_day: editExactDay,
@@ -170,7 +180,7 @@ export default function TusiCatalogPage() {
 
   const handleDeleteTemplate = async (templateId: string, title: string) => {
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini tidak akan menghapus tugas yang sudah terlanjur dikloning pada periode aktif.`
+      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini tidak akan menghapus tugas yang sudah terlanjur berjalan pada periode aktif.`
     );
     if (!confirmed) return;
 
@@ -185,6 +195,58 @@ export default function TusiCatalogPage() {
       setSuccessMsg(`Master Tusi "${title}" berhasil dihapus.`);
       fetchTemplates();
       setTimeout(() => setSuccessMsg(''), 3500);
+    }
+  };
+
+  // Utilitas Pembersihan Duplikat Master Tusi Otomatis
+  const handleCleanDuplicates = async () => {
+    const confirmed = window.confirm(
+      'Apakah Anda ingin membersihkan seluruh duplikat Master Tusi?\n\nSistem akan mempertahankan satu master asli yang paling awal dan menghapus salinan tusi ganda yang identik di database.'
+    );
+    if (!confirmed) return;
+
+    setIsCleaningDuplicates(true);
+    try {
+      const seen = new Set<string>();
+      const idsToDelete: string[] = [];
+
+      // Sort dari yang terlama dibuat
+      const sortedTemplates = [...templates].sort((a, b) => 
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+
+      for (const t of sortedTemplates) {
+        const key = `${t.title.trim().toLowerCase()}_${t.tusi_type?.toUpperCase()}_${t.period_type}`;
+        if (seen.has(key)) {
+          idsToDelete.push(t.id);
+        } else {
+          seen.add(key);
+        }
+      }
+
+      if (idsToDelete.length === 0) {
+        alert('Tidak ditemukan data duplikat pada Bank Tusi.');
+      } else {
+        const { error } = await supabase
+          .from('task_templates')
+          .delete()
+          .in('id', idsToDelete);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        setSuccessMsg(`Berhasil membersihkan ${idsToDelete.length} master tusi duplikat.`);
+        await fetchTemplates();
+      }
+    } catch (err: any) {
+      setErrorMsg(`Gagal membersihkan duplikat: ${err.message}`);
+    } finally {
+      setIsCleaningDuplicates(false);
+      setTimeout(() => {
+        setSuccessMsg('');
+        setErrorMsg('');
+      }, 4000);
     }
   };
 
@@ -233,7 +295,6 @@ export default function TusiCatalogPage() {
     return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
   };
 
-  // KLONING TUGAS: Otomatis masuk ke unit staf yang login & otomatis jadikan staf sebagai PIC
   const handleCloneTask = async (template: TemplateItem) => {
     setCloningId(template.id);
     const { data: { user } } = await supabase.auth.getUser();
@@ -247,7 +308,6 @@ export default function TusiCatalogPage() {
     const now = new Date();
     const deadlineStr = calculateDeadlineForClone(template);
 
-    // Hitung period_month akurat
     let periodMonth = now.getMonth() + 1;
     if (template.period_type === 'TRIWULANAN') {
       periodMonth = Math.ceil(periodMonth / 3) * 3;
@@ -257,19 +317,20 @@ export default function TusiCatalogPage() {
       periodMonth = 12;
     }
 
-    // 1. Insert ke tabel tasks unit pemohon
     const { data: newTask, error: taskError } = await supabase
       .from('tasks')
       .insert({
         unit_id: currentUserProfile.unit_id,
         template_id: template.id,
         title: template.title,
+        category: template.category || 'TUSI',
         description: template.description,
         legal_basis: template.legal_basis,
         period_type: template.period_type,
         period_month: periodMonth,
         period_year: now.getFullYear(),
         deadline: deadlineStr,
+        critical_days_threshold: template.critical_days_threshold || 3,
         status: 'BELUM_DIKERJAKAN',
         progress_pct: 0,
         created_by: user.id,
@@ -283,7 +344,6 @@ export default function TusiCatalogPage() {
       return;
     }
 
-    // 2. Daftarkan staf pengkloning langsung sebagai PIC di task_pics
     await supabase.from('task_pics').insert({
       task_id: newTask.id,
       user_id: user.id,
@@ -291,17 +351,15 @@ export default function TusiCatalogPage() {
 
     setCloningId(null);
     setSuccessMsg(
-      `Tusi "${template.title}" berhasil dikloning ke unit Anda dan otomatis masuk ke daftar tugas Anda! (Tenggat: ${deadlineStr})`
+      `Tusi "${template.title}" berhasil dikloning ke unit Anda dan otomatis masuk ke daftar tugas aktif! (Tenggat: ${deadlineStr})`
     );
     setTimeout(() => setSuccessMsg(''), 4500);
   };
 
-  // Kumpulan tombol filter tusi dinamis dari data yang ada
   const dynamicTusiList = Array.from(
     new Set(['ALL', userTusiType, ...templates.map((t) => t.tusi_type?.toUpperCase()).filter(Boolean)])
   );
 
-  // Filter scoped: Staf biasa otomatis hanya melihat Tusi sejenis (misal ASPLK)
   const filtered = templates.filter((t) => {
     const matchSearch =
       t.title.toLowerCase().includes(search.toLowerCase()) ||
@@ -311,11 +369,9 @@ export default function TusiCatalogPage() {
     if (!matchSearch) return false;
 
     if (!isSuperAdmin) {
-      // Non-admin hanya melihat tusi sejenis (misal ASPLK)
       return t.tusi_type?.toUpperCase() === userTusiType.toUpperCase();
     }
 
-    // Super Admin bebas memilih ALL atau tusi spesifik
     return selectedTusi === 'ALL' || t.tusi_type?.toUpperCase() === selectedTusi.toUpperCase();
   });
 
@@ -332,18 +388,32 @@ export default function TusiCatalogPage() {
           </div>
           <p className="text-xs text-stone-500 mt-1">
             {!isSuperAdmin 
-              ? `Menampilkan standar tugas fungsi Seksi ${userTusiType} dari seluruh unit/KPPN se-wilayah yang dapat Anda adopsi secara instan.`
+              ? `Standar tugas fungsi Seksi ${userTusiType} dari seluruh satker se-wilayah yang dapat Anda adopsi secara instan.`
               : 'Koleksi master standar tugas fungsi seluruh unit vertikal.'}
           </p>
         </div>
 
-        <Link
-          href="/tusi-catalog/new"
-          className="inline-flex items-center gap-2 bg-[#DF3B68] text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-sm hover:bg-[#C72F58] transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Master Tusi</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          {templates.length > 0 && (
+            <button
+              onClick={handleCleanDuplicates}
+              disabled={isCleaningDuplicates}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-xs font-semibold text-stone-700 shadow-2xs transition-all disabled:opacity-50"
+              title="Hapus master tusi yang terduplikasi di database"
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isCleaningDuplicates ? 'Membersihkan...' : 'Bersihkan Duplikat'}</span>
+            </button>
+          )}
+
+          <Link
+            href="/tusi-catalog/new"
+            className="inline-flex items-center gap-2 bg-[#DF3B68] text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-sm hover:bg-[#C72F58] transition-all self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Master Tusi</span>
+          </Link>
+        </div>
       </div>
 
       {successMsg && (
@@ -373,7 +443,6 @@ export default function TusiCatalogPage() {
           />
         </div>
 
-        {/* Filter Tusi: Super Admin dapat memilih kategori lain, staf biasa terkunci pada Tusi unitnya */}
         {isSuperAdmin ? (
           <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
             {dynamicTusiList.map((type) => (
@@ -415,6 +484,7 @@ export default function TusiCatalogPage() {
         ) : (
           filtered.map((t) => {
             const hasManageAccess = canManageTemplate(t);
+            const isClerical = t.is_recurring ?? (t.period_type !== 'INSIDENTIL');
 
             return (
               <div
@@ -430,6 +500,16 @@ export default function TusiCatalogPage() {
                       <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-full">
                         {t.period_type}
                       </span>
+                      {/* Label Sifat Klerikal vs Non-Klerikal */}
+                      {isClerical ? (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <RotateCw className="w-2.5 h-2.5" /> Auto-Cycle
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-full">
+                          Non-Klerikal
+                        </span>
+                      )}
                     </div>
 
                     {hasManageAccess && (
@@ -553,6 +633,22 @@ export default function TusiCatalogPage() {
                   </select>
                 </div>
               </div>
+
+              {/* Toggle Sifat Klerikal / Otomasi */}
+              {editPeriodType !== 'INSIDENTIL' && (
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-stone-800 block">Generate Otomatis per Periode (Klerikal):</span>
+                    <span className="text-[11px] text-stone-500">Cron akan membuat tugas baru tiap awal siklus</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={editIsRecurring}
+                    onChange={(e) => setEditIsRecurring(e.target.checked)}
+                    className="w-4 h-4 text-[#DF3B68] rounded focus:ring-[#DF3B68] cursor-pointer"
+                  />
+                </div>
+              )}
 
               {editPeriodType !== 'INSIDENTIL' && (
                 <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
