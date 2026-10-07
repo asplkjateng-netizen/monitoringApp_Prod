@@ -12,8 +12,7 @@ import {
   MessageSquare, 
   Loader2, 
   AlertCircle,
-  Eye,
-  FileImage
+  Eye
 } from 'lucide-react';
 import { TaskCardExport, TaskExportData } from './task-card-export';
 import { createClient } from '@/lib/supabase/client';
@@ -26,6 +25,61 @@ interface TaskShareModalProps {
     is_public_shared?: boolean;
   };
   onShareStatusChanged?: (isShared: boolean) => void;
+}
+
+// Helper: Muat html-to-image via CDN otomatis jika npm package belum terpasang
+function loadHtmlToImageEngine(): Promise<any> {
+  return new Promise(async (resolve, reject) => {
+    // 1. Cek apakah sudah ada di window global
+    if (typeof window !== 'undefined' && (window as any).htmlToImage) {
+      return resolve((window as any).htmlToImage);
+    }
+
+    // 2. Coba import dari node_modules lokal
+    try {
+      // @ts-ignore
+      const localModule = await import('html-to-image');
+      if (localModule && localModule.toPng) {
+        return resolve(localModule);
+      }
+    } catch (_) {
+      // Modul lokal belum di-install, lanjutkan ke CDN fallback
+    }
+
+    // 3. Fallback CDN Otomatis (Cloudflare CDN / jsDelivr)
+    if (typeof document !== 'undefined') {
+      const existingScript = document.getElementById('html-to-image-cdn');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve((window as any).htmlToImage));
+        existingScript.addEventListener('error', () => reject(new Error('Gagal memuat engine CDN')));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.id = 'html-to-image-cdn';
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js';
+      script.async = true;
+      script.onload = () => {
+        if ((window as any).htmlToImage) {
+          resolve((window as any).htmlToImage);
+        } else {
+          reject(new Error('Objek htmlToImage tidak ditemukan'));
+        }
+      };
+      script.onerror = () => {
+        // Coba mirror jsdelivr jika CDN utama gagal
+        const backupScript = document.createElement('script');
+        backupScript.src = 'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js';
+        backupScript.async = true;
+        backupScript.onload = () => resolve((window as any).htmlToImage);
+        backupScript.onerror = () => reject(new Error('Koneksi CDN terputus'));
+        document.head.appendChild(backupScript);
+      };
+      document.head.appendChild(script);
+    } else {
+      reject(new Error('Browser environment tidak ditemukan'));
+    }
+  });
 }
 
 export function TaskShareModal({
@@ -46,23 +100,25 @@ export function TaskShareModal({
 
   if (!isOpen) return null;
 
-  // Base URL Tautan Publik
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const shareToken = task.share_token || task.id;
   const publicShareUrl = `${baseUrl}/share/task/${shareToken}`;
 
-  // 1. Aksi Unduh Snapshot Gambar PNG
+  // 1. Aksi Unduh Snapshot Gambar PNG (Menggunakan Dual-Engine)
   const handleDownloadImage = async () => {
     if (!exportCardRef.current) return;
     setDownloadingImg(true);
     setErrorMsg('');
 
     try {
-      // Dynamic import aman dari html-to-image
-      const htmlToImage = await import('html-to-image');
-      const dataUrl = await htmlToImage.toPng(exportCardRef.current, {
-        quality: 0.95,
-        pixelRatio: 2, // Hasil gambar tajam (Retina / 2x resolution)
+      const engine = await loadHtmlToImageEngine();
+      if (!engine || !engine.toPng) {
+        throw new Error('Engine render gambar tidak tersedia.');
+      }
+
+      const dataUrl = await engine.toPng(exportCardRef.current, {
+        quality: 0.98,
+        pixelRatio: 2, // Resolusi 2x Ultra HD
         backgroundColor: '#FFFFFF',
       });
 
@@ -79,14 +135,14 @@ export function TaskShareModal({
     } catch (err: any) {
       console.error('Gagal membuat gambar PNG:', err);
       setErrorMsg(
-        'Gagal mengunduh gambar. Pastikan paket "html-to-image" telah terpasang di proyek Anda.'
+        'Gagal mengunduh gambar. Pastikan perangkat Anda terhubung ke internet untuk memuat renderer gambar.'
       );
     } finally {
       setDownloadingImg(false);
     }
   };
 
-  // 2. Aksi Toggle Sakelar Publik (Update Supabase)
+  // 2. Aksi Toggle Sakelar Publik (Supabase Update)
   const handleTogglePublicShare = async () => {
     setTogglingPublic(true);
     setErrorMsg('');
@@ -127,7 +183,7 @@ export function TaskShareModal({
     }
   };
 
-  // 4. Aksi Bagikan ke WhatsApp
+  // 4. Aksi Bagikan Ringkasan ke WhatsApp
   const handleShareToWhatsApp = () => {
     const totalSub = task.subtasks?.length || 0;
     const completedSub = task.subtasks?.filter((s) => s.is_completed).length || 0;
@@ -297,7 +353,7 @@ export function TaskShareModal({
           )}
         </div>
 
-        {/* Hidden Container Khusus Snapshot Resolusi Tinggi */}
+        {/* Offscreen Node Khusus Snapshot Resolusi Tinggi */}
         <div className="fixed -left-[9999px] -top-[9999px] pointer-events-none opacity-0">
           <TaskCardExport ref={exportCardRef} task={task} />
         </div>
