@@ -18,9 +18,11 @@ import {
   Edit3,
   CalendarDays,
   Info,
-  BookOpen
+  BookOpen,
+  Share2
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { TaskShareModal } from '@/components/tasks/task-share-modal';
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -33,7 +35,10 @@ export default function TaskDetailPage() {
   const [pics, setPics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // States Tambah Subtask Baru (Termasuk Batas Waktu Opsional)
+  // State Modal Sharing Hub
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+
+  // States Tambah Subtask Baru
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newSubtaskDeadline, setNewSubtaskDeadline] = useState('');
   const [addingSubtask, setAddingSubtask] = useState(false);
@@ -61,10 +66,10 @@ export default function TaskDetailPage() {
     setLoading(true);
     setErrorMsg('');
 
-    // 1. Ambil Data Tugas
+    // 1. Ambil Data Tugas beserta Unit Kerja
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, unit:units(id, name, level)')
       .eq('id', taskId)
       .single();
 
@@ -81,7 +86,7 @@ export default function TaskDetailPage() {
     setEvidenceLinkInput(taskData.evidence_link || '');
     setKendalaInput(taskData.kendala_note || '');
 
-    // 2. Ambil Subtasks (termasuk kolom deadline)
+    // 2. Ambil Subtasks
     const { data: subData, error: subError } = await supabase
       .from('subtasks')
       .select('*')
@@ -163,7 +168,6 @@ export default function TaskDetailPage() {
     await loadTaskDetails();
   };
 
-  // Tambah Subtask dengan Validasi Deadline Opsional
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtaskTitle.trim()) return;
@@ -296,7 +300,7 @@ export default function TaskDetailPage() {
     if (!task) return null;
     if (task.status === 'SELESAI') {
       return (
-        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
           <CheckCircle2 className="w-3.5 h-3.5" /> Selesai Tervalidasi
         </span>
       );
@@ -322,13 +326,13 @@ export default function TaskDetailPage() {
       );
     } else if (diffDays <= 3) {
       return (
-        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-800">
           Sisa {diffDays} hari lagi
         </span>
       );
     } else {
       return (
-        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
           Sisa {diffDays} hari
         </span>
       );
@@ -336,33 +340,60 @@ export default function TaskDetailPage() {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-sm text-stone-400">Memuat rincian tugas...</div>;
+    return <div className="p-12 text-center text-sm text-stone-400 dark:text-slate-500">Memuat rincian tugas...</div>;
   }
 
   if (!task) {
     return (
       <div className="p-8 text-center space-y-4">
-        <p className="text-stone-600">{errorMsg || 'Tugas tidak ditemukan'}</p>
+        <p className="text-stone-600 dark:text-slate-400">{errorMsg || 'Tugas tidak ditemukan'}</p>
         <Link href="/tasks" className="text-sm font-semibold text-[#DF3B68]">Kembali ke Daftar Tugas</Link>
       </div>
     );
   }
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
+      
+      {/* MODAL SHARING HUB */}
+      {task && (
+        <TaskShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => setIsShareModalOpen(false)}
+          task={{
+            ...task,
+            subtasks,
+            pics,
+          }}
+          onShareStatusChanged={(isShared) => {
+            setTask((prev: any) => ({ ...prev, is_public_shared: isShared }));
+          }}
+        />
+      )}
+
       {/* Top Bar Navigasi & Aksi */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/tasks"
-          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
+          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-slate-400 hover:text-stone-900 dark:hover:text-slate-100 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar
         </Link>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Tombol Sharing Hub */}
+          <button
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-[#DF3B68] bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors shadow-xs"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Bagikan
+          </button>
+
           <Link
             href={`/tasks/${taskId}/edit`}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-white border border-stone-200 hover:bg-stone-50 transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-750 transition-colors shadow-xs"
           >
             <Edit3 className="w-3.5 h-3.5 text-stone-500" />
             Edit Lengkap
@@ -371,51 +402,51 @@ export default function TaskDetailPage() {
           <button
             onClick={handleDeleteTask}
             disabled={deletingTask}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-100 transition-colors"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
             {deletingTask ? 'Menghapus...' : 'Hapus Tugas'}
           </button>
         </div>
       </div>
 
       {errorMsg && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+        <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
       {successMsg && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {manualNotice && (
-        <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center gap-2">
-          <Info className="w-4 h-4 flex-shrink-0 text-blue-600" />
+        <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 text-blue-800 dark:text-blue-300 text-xs flex items-center gap-2">
+          <Info className="w-4 h-4 shrink-0 text-blue-600 dark:text-blue-400" />
           <span>{manualNotice}</span>
         </div>
       )}
 
       {/* Header Rincian Tugas */}
-      <div className="bg-white p-6 md:p-8 rounded-3xl border border-stone-200/70 shadow-sm space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-3">
-          <div className="flex items-center gap-2">
+      <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-5 transition-colors">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2 flex-wrap">
             {getDeadlineStatusBadge()}
-            <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 text-stone-700">
+            <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 dark:bg-slate-800 text-stone-700 dark:text-slate-300 border-stone-200 dark:border-slate-700">
               Periode {task.period_type} {task.period_month ? `(Bulan ${task.period_month}/${task.period_year})` : ''}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-stone-400 font-medium">Prioritas:</span>
+            <span className="text-xs text-stone-400 dark:text-slate-500 font-medium">Prioritas:</span>
             <select
               value={currentPriority}
               onChange={(e) => setCurrentPriority(e.target.value)}
-              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50"
+              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200"
             >
               <option value="RENDAH">RENDAH</option>
               <option value="SEDANG">SEDANG</option>
@@ -425,31 +456,31 @@ export default function TaskDetailPage() {
         </div>
 
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-stone-900">{task.title}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100">{task.title}</h1>
           
-          <div className="flex items-center gap-2 text-xs text-stone-600 pt-1">
+          <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-slate-400 pt-1">
             <CalendarDays className="w-4 h-4 text-[#DF3B68]" />
             <span className="font-semibold">Tenggat Waktu:</span>
             <input
               type="date"
               value={currentDeadline}
               onChange={(e) => setCurrentDeadline(e.target.value)}
-              className="px-2 py-1 text-xs border border-stone-200 rounded-lg bg-stone-50 font-mono"
+              className="px-2 py-1 text-xs border border-stone-200 dark:border-slate-700 rounded-lg bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 font-mono"
             />
           </div>
         </div>
 
         {task.description && (
-          <p className="text-xs md:text-sm text-stone-600 leading-relaxed bg-stone-50/70 p-4 rounded-2xl border border-stone-100">
+          <p className="text-xs md:text-sm text-stone-600 dark:text-slate-300 leading-relaxed bg-stone-50/70 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-100 dark:border-slate-800">
             {task.description}
           </p>
         )}
 
-        {/* Dasar Hukum & Link Tautan Regulasi */}
+        {/* Dasar Hukum */}
         {task.legal_basis && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
-            <span className="font-semibold text-stone-800">Dasar Hukum:</span>
-            <span className="bg-stone-100 px-2.5 py-1 rounded-lg font-mono text-stone-700 border border-stone-200">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600 dark:text-slate-300">
+            <span className="font-semibold text-stone-800 dark:text-slate-200">Dasar Hukum:</span>
+            <span className="bg-stone-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg font-mono text-stone-700 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
               {task.legal_basis}
             </span>
             {task.legal_basis_link && (
@@ -457,9 +488,9 @@ export default function TaskDetailPage() {
                 href={task.legal_basis_link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-lg border border-blue-200 transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 px-3 py-1 rounded-lg border border-blue-200 dark:border-blue-800 transition-colors"
               >
-                <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>Buka Dokumen Regulasi</span>
                 <ExternalLink className="w-3 h-3 text-blue-500" />
               </a>
@@ -469,9 +500,9 @@ export default function TaskDetailPage() {
 
         {pics.length > 0 && (
           <div className="pt-1 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-stone-500">PIC Pelaksana:</span>
+            <span className="text-xs font-semibold text-stone-500 dark:text-slate-400">PIC Pelaksana:</span>
             {pics.map((p) => (
-              <span key={p.id} className="text-[11px] bg-stone-100 text-stone-700 px-2.5 py-0.5 rounded-full font-medium border border-stone-200">
+              <span key={p.id} className="text-[11px] bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 px-2.5 py-0.5 rounded-full font-medium border border-stone-200 dark:border-slate-700">
                 {p.full_name} ({p.role})
               </span>
             ))}
@@ -480,11 +511,11 @@ export default function TaskDetailPage() {
 
         {/* Progress Bar */}
         <div className="pt-2 space-y-1.5">
-          <div className="flex justify-between text-xs font-semibold text-stone-700">
+          <div className="flex justify-between text-xs font-semibold text-stone-700 dark:text-slate-300">
             <span>Kalkulasi Progres Pelaksanaan</span>
             <span className="font-mono">{task.progress_pct}%</span>
           </div>
-          <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
+          <div className="w-full h-3 bg-stone-100 dark:bg-slate-800 rounded-full overflow-hidden border border-stone-200/60 dark:border-slate-700">
             <div 
               className={`h-full transition-all duration-500 rounded-full ${getProgressBarColor(task.progress_pct || 0)}`}
               style={{ width: `${task.progress_pct || 0}%` }}
@@ -497,25 +528,25 @@ export default function TaskDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Kolom Subtasks */}
-        <div className="md:col-span-2 bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+        <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-4 transition-colors">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
             <div>
-              <h2 className="font-bold text-stone-900 text-base">Checklist Sub-pekerjaan</h2>
-              <p className="text-xs text-stone-500">Centang tahapan untuk mengalkulasi progres otomatis & mengubah status.</p>
+              <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan</h2>
+              <p className="text-xs text-stone-500 dark:text-slate-400">Centang tahapan untuk mengalkulasi progres otomatis & mengubah status.</p>
             </div>
-            <span className="text-xs font-semibold text-stone-500 bg-stone-100 px-2.5 py-1 rounded-full">
+            <span className="text-xs font-semibold text-stone-500 dark:text-slate-400 bg-stone-100 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-stone-200 dark:border-slate-700">
               {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
             </span>
           </div>
 
-          {/* Form Tambah Subtask dengan Opsi Batas Waktu */}
+          {/* Form Tambah Subtask */}
           <form onSubmit={handleAddSubtask} className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               placeholder="Ketik tahapan/sub-pekerjaan baru..."
               value={newSubtaskTitle}
               onChange={(e) => setNewSubtaskTitle(e.target.value)}
-              className="flex-1 px-3.5 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+              className="flex-1 px-3.5 py-2 text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
             />
             <div className="flex items-center gap-1.5">
               <input
@@ -523,13 +554,13 @@ export default function TaskDetailPage() {
                 max={currentDeadline || undefined}
                 value={newSubtaskDeadline}
                 onChange={(e) => setNewSubtaskDeadline(e.target.value)}
-                className="px-2.5 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 font-mono"
-                title="Batas waktu tahapan (opsional, maks = deadline tugas utama)"
+                className="px-2.5 py-2 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700 font-mono"
+                title="Batas waktu tahapan (opsional)"
               />
               <button
                 type="submit"
                 disabled={addingSubtask || !newSubtaskTitle.trim()}
-                className="px-4 py-2 bg-stone-900 text-white rounded-xl hover:bg-stone-800 disabled:bg-stone-300 transition-colors text-xs font-semibold flex items-center gap-1"
+                className="px-4 py-2 bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl hover:bg-stone-800 disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1"
               >
                 {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Tambah
@@ -538,9 +569,9 @@ export default function TaskDetailPage() {
           </form>
 
           {/* List Subtasks */}
-          <div className="divide-y divide-stone-100 pt-1">
+          <div className="divide-y divide-stone-100 dark:divide-slate-800 pt-1">
             {subtasks.length === 0 ? (
-              <div className="py-8 text-center text-xs text-stone-400">
+              <div className="py-8 text-center text-xs text-stone-400 dark:text-slate-500">
                 Belum ada tahapan sub-pekerjaan. Tambahkan tahapan di atas.
               </div>
             ) : (
@@ -551,16 +582,16 @@ export default function TaskDetailPage() {
                       type="checkbox"
                       checked={st.is_completed}
                       onChange={() => handleToggleSubtask(st.id, st.is_completed)}
-                      className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 cursor-pointer"
+                      className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-700 cursor-pointer"
                     />
-                    <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400 font-normal' : 'text-stone-800 font-medium'}`}>
+                    <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
                       {idx + 1}. {st.title}
                     </span>
                   </label>
 
                   <div className="flex items-center gap-2">
                     {st.deadline && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200" title="Batas waktu tahapan ini">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
                         Batas: {st.deadline}
                       </span>
                     )}
@@ -580,18 +611,18 @@ export default function TaskDetailPage() {
         </div>
 
         {/* Kolom Kontrol Status & Bukti */}
-        <div className="bg-white p-6 rounded-3xl border border-stone-200/70 shadow-sm space-y-4 flex flex-col justify-between">
+        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-4 flex flex-col justify-between transition-colors">
           <div className="space-y-4">
-            <h2 className="font-bold text-stone-900 text-base">Status & Validasi Bukti</h2>
+            <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Status & Validasi Bukti</h2>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Ubah Status Pekerjaan:
               </label>
               <select
                 value={currentStatus}
                 onChange={(e) => handleManualStatusChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-stone-200 bg-stone-50 focus:ring-2 focus:ring-[#DF3B68]/20"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 focus:ring-2 focus:ring-[#DF3B68]/30"
               >
                 <option value="BELUM_DIKERJAKAN">Belum Mulai</option>
                 <option value="ON_PROGRESS">On Progress (Sedang Dikerjakan)</option>
@@ -601,7 +632,7 @@ export default function TaskDetailPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Link Bukti Dukung (Google Drive / Cloud)
               </label>
               <div className="relative">
@@ -611,7 +642,7 @@ export default function TaskDetailPage() {
                   placeholder="https://drive.google.com/..."
                   value={evidenceLinkInput}
                   onChange={(e) => setEvidenceLinkInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 font-mono"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 font-mono"
                 />
               </div>
               {task.evidence_link && (
@@ -627,7 +658,7 @@ export default function TaskDetailPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Catatan / Kendala {currentStatus === 'TERKENDALA' && <span className="text-rose-500">*</span>}
               </label>
               <textarea
@@ -635,16 +666,16 @@ export default function TaskDetailPage() {
                 placeholder="Deskripsikan hambatan atau kendala eksekusi..."
                 value={kendalaInput}
                 onChange={(e) => setKendalaInput(e.target.value)}
-                className="w-full p-2.5 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 resize-none"
+                className="w-full p-2.5 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 resize-none"
               />
             </div>
           </div>
 
-          <div className="space-y-2 pt-4 border-t border-stone-100">
+          <div className="space-y-2 pt-4 border-t border-stone-100 dark:border-slate-800">
             <button
               onClick={handleSaveChanges}
               disabled={savingChanges}
-              className="w-full py-2.5 px-4 bg-[#DF3B68] hover:bg-[#C72F58] disabled:bg-stone-200 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-xs"
+              className="w-full py-2.5 px-4 bg-[#DF3B68] hover:bg-[#C72F58] disabled:opacity-50 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-2 shadow-xs"
             >
               {savingChanges ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               Simpan Pembaruan Tugas
