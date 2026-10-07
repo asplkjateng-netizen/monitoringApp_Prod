@@ -278,20 +278,20 @@ function TasksContent() {
     switch (category) {
       case 'TAMBAHAN':
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md border border-amber-200">
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
             Tambahan
           </span>
         );
       case 'IMPROVISASI':
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md border border-purple-200">
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800">
             Improvisasi
           </span>
         );
       case 'TUSI':
       default:
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-200">
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-800">
             Tusi
           </span>
         );
@@ -305,7 +305,6 @@ function TasksContent() {
       
     if (!matchesSearch) return false;
 
-    // Filter Kategori (Tusi / Tambahan / Improvisasi)
     if (categoryFilter !== 'ALL') {
       const cat = t.category || 'TUSI';
       if (cat !== categoryFilter) return false;
@@ -357,7 +356,7 @@ function TasksContent() {
   const getUrgencyBadge = (task: TaskItem) => {
     if (task.status === 'SELESAI') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
           <CheckCircle2 className="w-3.5 h-3.5" /> Selesai
         </span>
       );
@@ -368,7 +367,7 @@ function TasksContent() {
 
     if (diffDays < 0) {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-red-600 text-white shadow-xs">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-red-600 dark:bg-rose-600 text-white shadow-xs">
           Terlambat {Math.abs(diffDays)} hari
         </span>
       );
@@ -380,13 +379,13 @@ function TasksContent() {
       );
     } else if (diffDays <= threshold) {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-800">
           Sisa {diffDays} hari (Kritis H-{threshold})
         </span>
       );
     } else {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-stone-100 text-stone-600 border border-stone-200">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
           Sisa {diffDays} hari
         </span>
       );
@@ -398,51 +397,66 @@ function TasksContent() {
       case 'SELESAI':
         return null;
       case 'ON_PROGRESS':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">On Progress</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+            On Progress
+          </span>
+        );
       case 'TERKENDALA':
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200"><AlertCircle className="w-3 h-3" /> Terkendala</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+            <AlertCircle className="w-3 h-3" /> Terkendala
+          </span>
+        );
       default:
-        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 text-stone-600 border border-stone-200">Belum Mulai</span>;
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
+            Belum Mulai
+          </span>
+        );
     }
   };
 
   return (
-    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header & Aksi Rekam */}
+    <div className="p-4 sm:p-6 md:p-8 space-y-5 md:space-y-6 max-w-7xl mx-auto">
+      
+      {/* HEADER & AKSI REKAM */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Daftar Pekerjaan</h1>
-          <p className="text-sm text-stone-500 mt-1">Pemantauan progres, klasifikasi tusi/tambahan/improvisasi, dan masa kritis.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Daftar Pekerjaan</h1>
+          <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1">
+            Pemantauan progres, klasifikasi tusi/tambahan/improvisasi, dan masa kritis.
+          </p>
         </div>
         <Link
           href="/tasks/new"
-          className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-5 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-sm"
+          className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-5 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-sm self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" /> Rekam Tugas Baru
         </Link>
       </div>
 
       {/* FILTER BAR UTAMA */}
-      <div className="flex flex-col gap-3 bg-white p-4 rounded-2xl border border-stone-200/70 shadow-sm">
+      <div className="flex flex-col gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-stone-200/70 dark:border-slate-800 shadow-sm transition-colors">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-stone-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Cari uraian tugas / unit kerja..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+              className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/70 dark:bg-slate-800/80 rounded-xl border border-stone-200 dark:border-slate-700 text-stone-900 dark:text-slate-100 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
             />
           </div>
 
           {isSuperAdmin && (
             <div className="flex items-center gap-1.5">
-              <Building2 className="w-4 h-4 text-stone-400 hidden sm:block" />
+              <Building2 className="w-4 h-4 text-stone-400 dark:text-slate-500 hidden sm:block" />
               <select
                 value={selectedUnitFilter}
                 onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                className="px-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 text-stone-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                className="w-full md:w-auto px-3 py-2 text-xs bg-stone-50 dark:bg-slate-800 rounded-xl border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
               >
                 <option value="ALL_UNITS">🌐 Seluruh Unit (Regional se-Wilayah)</option>
                 <option value="MY_UNIT">Unit Saya Saja</option>
@@ -456,12 +470,12 @@ function TasksContent() {
           )}
         </div>
 
-        {/* Baris Tab Filter: Status & Kategori Tugas */}
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100">
-          {/* Status Filter */}
-          <div className="flex items-center gap-1 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0">
+        {/* Tab Filter Bar: Status & Kategori */}
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-slate-800">
+          {/* Status Filter Tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 scrollbar-none">
             {[
-              { id: 'ALL', label: 'Semua Status' },
+              { id: 'ALL', label: 'Semua' },
               { id: 'KRITIS', label: 'Kritis (H-X)' },
               { id: 'BELUM_DIKERJAKAN', label: 'Belum Mulai' },
               { id: 'ON_PROGRESS', label: 'Proses' },
@@ -473,8 +487,8 @@ function TasksContent() {
                 onClick={() => setStatusFilter(tab.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                   statusFilter === tab.id
-                    ? 'bg-stone-900 text-white shadow-sm'
-                    : 'text-stone-600 hover:bg-stone-100'
+                    ? 'bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
+                    : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
                 }`}
               >
                 {tab.label}
@@ -483,8 +497,8 @@ function TasksContent() {
           </div>
 
           {/* Kategori Filter Chips */}
-          <div className="flex items-center gap-1.5 self-end lg:self-auto">
-            <span className="text-[11px] font-semibold text-stone-400 flex items-center gap-1 mr-1">
+          <div className="flex items-center gap-1.5 flex-wrap self-start sm:self-end lg:self-auto">
+            <span className="text-[11px] font-semibold text-stone-400 dark:text-slate-500 flex items-center gap-1 mr-1">
               <Tag className="w-3 h-3" /> Jenis:
             </span>
             {[
@@ -499,7 +513,7 @@ function TasksContent() {
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                   categoryFilter === cat.id
                     ? 'bg-[#DF3B68] text-white font-semibold'
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    : 'bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 hover:bg-stone-200 dark:hover:bg-slate-700'
                 }`}
               >
                 {cat.label}
@@ -509,111 +523,358 @@ function TasksContent() {
         </div>
       </div>
 
-      {/* DAFTAR PEKERJAAN */}
-      <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden">
+      {/* DAFTAR PEKERJAAN (ADAPTIVE VIEW) */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
         {loading ? (
-          <div className="py-20 text-center text-sm text-stone-400">Memuat daftar tugas...</div>
+          <div className="py-20 text-center text-sm text-stone-400 dark:text-slate-500 flex flex-col items-center justify-center gap-2">
+            <Loader2 className="w-6 h-6 animate-spin text-[#DF3B68]" />
+            <span>Memuat daftar tugas...</span>
+          </div>
         ) : filteredTasks.length === 0 ? (
-          <div className="py-20 text-center">
-            <p className="text-stone-500 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
-            <p className="text-stone-400 text-xs mt-1">
-              Coba pilih siklus periode lain di pojok kanan atas atau ubah saringan status/jenis pekerjaan.
+          <div className="py-20 text-center px-4">
+            <p className="text-stone-600 dark:text-slate-300 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
+            <p className="text-stone-400 dark:text-slate-500 text-xs mt-1">
+              Coba pilih siklus periode lain di menu atas atau sesuaikan saringan status/jenis pekerjaan.
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-stone-100">
-            {filteredTasks.map((task) => {
-              const isSubExpanded = expandedTaskIds.includes(task.id);
-              const isDescExpanded = expandedDescIds.includes(task.id);
-              const progressPct = getEffectiveProgress(task);
-              const subtasksCount = task.subtasks?.length || 0;
-              const hasLegalLink = !!task.legal_basis_link;
-              const hasEvidence = !!task.evidence_link;
+          <div>
+            {/* ------------------------------------------------------------- */}
+            {/* VIEW 1: DESKTOP TABLE/LIST VIEW (Layar >= md)                  */}
+            {/* ------------------------------------------------------------- */}
+            <div className="hidden md:block divide-y divide-stone-100 dark:divide-slate-800/80">
+              {filteredTasks.map((task) => {
+                const isSubExpanded = expandedTaskIds.includes(task.id);
+                const isDescExpanded = expandedDescIds.includes(task.id);
+                const progressPct = getEffectiveProgress(task);
+                const subtasksCount = task.subtasks?.length || 0;
+                const hasLegalLink = !!task.legal_basis_link;
+                const hasEvidence = !!task.evidence_link;
 
-              return (
-                <div key={task.id} className="transition-colors hover:bg-stone-50/40">
-                  <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-2 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {renderCategoryBadge(task.category)}
-                        {getUrgencyBadge(task)}
-                        {getStatusBadge(task.status)}
-                        
-                        {task.unit && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 text-stone-700 px-2 py-0.5 rounded-md border border-stone-200">
-                            <Building2 className="w-3 h-3 text-stone-500" />
-                            {task.unit.name}
+                return (
+                  <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
+                    <div className="p-5 flex items-center justify-between gap-4">
+                      <div className="space-y-2 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {renderCategoryBadge(task.category)}
+                          {getUrgencyBadge(task)}
+                          {getStatusBadge(task.status)}
+                          
+                          {task.unit && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
+                              <Building2 className="w-3 h-3 text-stone-500 dark:text-slate-400" />
+                              {task.unit.name}
+                            </span>
+                          )}
+
+                          <span className="text-[11px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800/50 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
+                            {task.priority}
                           </span>
+                          <span className="text-xs text-stone-400 dark:text-slate-500 flex items-center gap-1 font-mono">
+                            <Calendar className="w-3.5 h-3.5" />
+                            Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        </div>
+
+                        <h3 className="font-semibold text-stone-900 dark:text-slate-100 text-base">{task.title}</h3>
+                        
+                        {task.kendala_note && task.status === 'TERKENDALA' && (
+                          <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-xl border border-rose-100 dark:border-rose-900/50">
+                            <strong>Hambatan/Kendala:</strong> {task.kendala_note}
+                          </p>
                         )}
 
-                        <span className="text-[11px] font-semibold text-stone-600 bg-stone-50 px-2 py-0.5 rounded-md border border-stone-200">
-                          {task.priority}
-                        </span>
-                        <span className="text-xs text-stone-400 flex items-center gap-1 font-mono">
-                          <Calendar className="w-3.5 h-3.5" />
-                          Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </span>
+                        <div className="flex items-center gap-3 pt-1 max-w-xs">
+                          <div className="flex-1 h-2 bg-stone-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-semibold text-stone-600 dark:text-slate-300">{progressPct}%</span>
+                        </div>
                       </div>
 
-                      <h3 className="font-semibold text-stone-900 text-base">{task.title}</h3>
-                      
-                      {task.kendala_note && task.status === 'TERKENDALA' && (
-                        <p className="text-xs text-rose-600 bg-rose-50 p-2 rounded-xl border border-rose-100">
-                          <strong>Hambatan/Kendala:</strong> {task.kendala_note}
-                        </p>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {(task.description || task.legal_basis || hasLegalLink) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleDescription(task.id)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
+                              isDescExpanded
+                                ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                                : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>Dasar Hukum & Petunjuk</span>
+                            {isDescExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
 
-                      <div className="flex items-center gap-3 pt-1 max-w-xs">
-                        <div className="flex-1 h-2 bg-stone-100 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
-                            style={{ width: `${progressPct}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-semibold text-stone-600">{progressPct}%</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleSubtasks(task.id)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
+                            isSubExpanded 
+                              ? 'bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 border-stone-900 dark:border-slate-100' 
+                              : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
+                          <span>Sub-tugas ({subtasksCount})</span>
+                          {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+
+                        {hasLegalLink && (
+                          <a
+                            href={task.legal_basis_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors"
+                            title="Buka Dokumen Regulasi Cloud"
+                          >
+                            <LinkIcon className="w-3.5 h-3.5" /> Regulasi
+                          </a>
+                        )}
+
+                        {hasEvidence && (
+                          <a
+                            href={task.evidence_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-[#DF3B68] bg-[#DF3B68]/10 hover:bg-[#DF3B68]/20 transition-colors"
+                            title="Buka Dokumen Bukti Penyelesaian"
+                          >
+                            <FileText className="w-3 h-3" /> Bukti
+                          </a>
+                        )}
+
+                        <Link
+                          href={`/tasks/${task.id}`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-slate-200 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 dark:hover:bg-slate-700 transition-colors"
+                        >
+                          Kelola
+                          <ExternalLink className="w-3 h-3" />
+                        </Link>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 self-end md:self-center">
+                    {/* Accordion Dasar Hukum Desktop */}
+                    {isDescExpanded && (
+                      <div className="px-5 pb-4 pt-1 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-2 animate-in fade-in duration-150">
+                        {task.legal_basis && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-700 dark:text-slate-300">
+                            <span className="font-bold text-amber-900 dark:text-amber-400">Dasar Hukum:</span>
+                            <span className="font-mono bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-stone-200 dark:border-slate-700">{task.legal_basis}</span>
+                            {task.legal_basis_link && (
+                              <a
+                                href={task.legal_basis_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                <ExternalLink className="w-3 h-3" /> Buka Tautan Dokumen Regulasi
+                              </a>
+                            )}
+                          </div>
+                        )}
+
+                        {task.description && (
+                          <div className="p-3 bg-white dark:bg-slate-800/90 rounded-xl border border-stone-200/70 dark:border-slate-700 text-xs text-stone-600 dark:text-slate-300 leading-relaxed">
+                            <p className="font-bold text-stone-800 dark:text-slate-200 mb-1">Petunjuk Teknis & Deskripsi:</p>
+                            {task.description}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Accordion Subtasks Desktop */}
+                    {isSubExpanded && (
+                      <div className="px-5 pb-5 pt-2 border-t border-stone-100 dark:border-slate-800 bg-stone-50/50 dark:bg-slate-850 space-y-3 animate-in fade-in duration-150">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
+                              <span>Tahapan Sub-Pekerjaan (Klik untuk mencentang progres):</span>
+                            </p>
+                            <Link
+                              href={`/tasks/${task.id}`}
+                              className="text-[11px] text-[#DF3B68] hover:underline font-semibold"
+                            >
+                              + Kelola Detail Sub-tugas
+                            </Link>
+                          </div>
+
+                          {!task.subtasks || task.subtasks.length === 0 ? (
+                            <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-stone-200 dark:border-slate-700 text-xs text-stone-400 dark:text-slate-500 italic">
+                              Belum ada sub-pekerjaan yang direkam untuk tugas ini.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {task.subtasks.map((st, idx) => {
+                                const isUpdating = updatingSubtaskId === st.id;
+
+                                return (
+                                  <button
+                                    type="button"
+                                    key={st.id || idx}
+                                    disabled={isUpdating}
+                                    onClick={() => handleToggleSubtask(st.id, st.is_completed, task.id)}
+                                    className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all text-left group cursor-pointer ${
+                                      st.is_completed
+                                        ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-300 hover:bg-emerald-100/70'
+                                        : 'bg-white dark:bg-slate-800 border-stone-200 dark:border-slate-700 text-stone-800 dark:text-slate-200 hover:border-[#DF3B68]/40 dark:hover:border-[#DF3B68]/60 hover:bg-rose-50/30'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+                                      {isUpdating ? (
+                                        <Loader2 className="w-4 h-4 text-[#DF3B68] animate-spin shrink-0" />
+                                      ) : st.is_completed ? (
+                                        <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                                      ) : (
+                                        <Square className="w-4 h-4 text-stone-400 dark:text-slate-500 shrink-0 group-hover:text-[#DF3B68] group-hover:scale-110 transition-transform" />
+                                      )}
+                                      <span className={`truncate font-medium ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500' : 'text-stone-800 dark:text-slate-200'}`}>
+                                        {idx + 1}. {st.title}
+                                      </span>
+                                    </div>
+
+                                    {st.deadline && (
+                                      <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
+                                        Batas: {st.deadline}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* VIEW 2: MOBILE ADAPTIVE TASK CARDS (Layar < md)               */}
+            {/* ------------------------------------------------------------- */}
+            <div className="md:hidden divide-y divide-stone-100 dark:divide-slate-800">
+              {filteredTasks.map((task) => {
+                const isSubExpanded = expandedTaskIds.includes(task.id);
+                const isDescExpanded = expandedDescIds.includes(task.id);
+                const progressPct = getEffectiveProgress(task);
+                const subtasksCount = task.subtasks?.length || 0;
+                const hasLegalLink = !!task.legal_basis_link;
+                const hasEvidence = !!task.evidence_link;
+
+                return (
+                  <div key={task.id} className="p-4 space-y-3.5 transition-colors">
+                    {/* Baris Badge Mobile */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {renderCategoryBadge(task.category)}
+                      {getUrgencyBadge(task)}
+                      {getStatusBadge(task.status)}
+                      <span className="text-[10px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
+                        {task.priority}
+                      </span>
+                    </div>
+
+                    {/* Judul & Detail Unit */}
+                    <div className="space-y-1">
+                      <h3 className="font-bold text-stone-900 dark:text-slate-100 text-sm leading-snug">
+                        {task.title}
+                      </h3>
+                      
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-slate-400 pt-0.5">
+                        {task.unit && (
+                          <span className="inline-flex items-center gap-1">
+                            <Building2 className="w-3.5 h-3.5 text-stone-400" />
+                            {task.unit.name}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1 font-mono">
+                          <Calendar className="w-3.5 h-3.5 text-stone-400" />
+                          {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Hambatan Kendala Jika Ada */}
+                    {task.kendala_note && task.status === 'TERKENDALA' && (
+                      <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-xl border border-rose-100 dark:border-rose-900/50">
+                        <strong>Kendala:</strong> {task.kendala_note}
+                      </p>
+                    )}
+
+                    {/* Progress Bar Mobile */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-semibold text-stone-600 dark:text-slate-300">
+                        <span>Capaian Progres</span>
+                        <span>{progressPct}%</span>
+                      </div>
+                      <div className="h-2 bg-stone-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Tombol Aksi Mobile Touch-Friendly */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleSubtasks(task.id)}
+                        className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-semibold border transition-colors ${
+                          isSubExpanded 
+                            ? 'bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 border-stone-900 dark:border-slate-100' 
+                            : 'bg-stone-50 dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
+                        <span>Subtugas ({subtasksCount})</span>
+                        {isSubExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+
+                      <Link
+                        href={`/tasks/${task.id}`}
+                        className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-semibold bg-[#DF3B68] text-white hover:bg-[#C72F58] transition-colors shadow-xs"
+                      >
+                        Kelola
+                        <ExternalLink className="w-3 h-3" />
+                      </Link>
+                    </div>
+
+                    {/* Tombol Sekunder Mobile: Dasar Hukum, Regulasi & Bukti */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                       {(task.description || task.legal_basis || hasLegalLink) && (
                         <button
                           type="button"
                           onClick={() => toggleDescription(task.id)}
-                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
-                            isDescExpanded
-                              ? 'bg-amber-50 text-amber-900 border-amber-300'
-                              : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                          className={`inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold border whitespace-nowrap transition-colors ${
+                            isDescExpanded 
+                              ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-300 border-amber-300' 
+                              : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-300 border-stone-200 dark:border-slate-700'
                           }`}
                         >
-                          <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Dasar Hukum & Petunjuk</span>
-                          {isDescExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          <BookOpen className="w-3 h-3 text-amber-600" />
+                          <span>Dasar Hukum</span>
+                          {isDescExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                         </button>
                       )}
-
-                      <button
-                        type="button"
-                        onClick={() => toggleSubtasks(task.id)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
-                          isSubExpanded 
-                            ? 'bg-stone-900 text-white border-stone-900' 
-                            : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
-                        }`}
-                      >
-                        <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
-                        <span>Sub-tugas ({subtasksCount})</span>
-                        {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                      </button>
 
                       {hasLegalLink && (
                         <a
                           href={task.legal_basis_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors"
-                          title="Buka Tautan Regulasi / Dasar Hukum"
+                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 whitespace-nowrap"
                         >
-                          <LinkIcon className="w-3.5 h-3.5" /> Regulasi
+                          <LinkIcon className="w-3 h-3" /> Link Regulasi
                         </a>
                       )}
 
@@ -622,74 +883,52 @@ function TasksContent() {
                           href={task.evidence_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-[#DF3B68] bg-[#DF3B68]/10 hover:bg-[#DF3B68]/20 transition-colors"
-                          title="Buka Dokumen Bukti Penyelesaian di Google Drive / Cloud"
+                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-[#DF3B68] bg-rose-50 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-900/50 whitespace-nowrap"
                         >
                           <FileText className="w-3 h-3" /> Bukti
                         </a>
                       )}
-
-                      <Link
-                        href={`/tasks/${task.id}`}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 transition-colors"
-                      >
-                        Kelola
-                        <ExternalLink className="w-3 h-3" />
-                      </Link>
                     </div>
-                  </div>
 
-                  {isDescExpanded && (
-                    <div className="px-5 pb-4 pt-1 bg-amber-50/40 border-t border-amber-100 space-y-2 animate-in fade-in duration-150">
-                      {task.legal_basis && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-stone-700">
-                          <span className="font-bold text-amber-900">Dasar Hukum:</span>
-                          <span className="font-mono bg-white px-2 py-0.5 rounded border border-stone-200">{task.legal_basis}</span>
-                          {task.legal_basis_link && (
-                            <a
-                              href={task.legal_basis_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline"
-                            >
-                              <ExternalLink className="w-3 h-3" /> Buka Tautan Dokumen Regulasi
-                            </a>
-                          )}
-                        </div>
-                      )}
+                    {/* Accordion Dasar Hukum Mobile */}
+                    {isDescExpanded && (
+                      <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-2 text-xs">
+                        {task.legal_basis && (
+                          <div>
+                            <span className="font-bold text-amber-900 dark:text-amber-400 block mb-0.5">Dasar Hukum:</span>
+                            <span className="font-mono bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-stone-200 dark:border-slate-700 block">
+                              {task.legal_basis}
+                            </span>
+                          </div>
+                        )}
+                        {task.description && (
+                          <div className="pt-1 text-stone-600 dark:text-slate-300 leading-relaxed">
+                            <span className="font-bold text-stone-800 dark:text-slate-200 block mb-0.5">Petunjuk Teknis:</span>
+                            {task.description}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                      {task.description && (
-                        <div className="p-3 bg-white rounded-xl border border-stone-200/70 text-xs text-stone-600 leading-relaxed">
-                          <p className="font-bold text-stone-800 mb-1">Petunjuk Teknis & Deskripsi:</p>
-                          {task.description}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* CHECKLIST SUB-PEKERJAAN */}
-                  {isSubExpanded && (
-                    <div className="px-5 pb-5 pt-2 border-t border-stone-100 bg-stone-50/50 space-y-3 animate-in fade-in duration-150">
-                      <div className="space-y-1.5">
+                    {/* Accordion Subtasks Mobile (Touch-Optimized) */}
+                    {isSubExpanded && (
+                      <div className="p-3 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-2.5 animate-in fade-in duration-150">
                         <div className="flex items-center justify-between">
-                          <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                          <p className="text-[11px] font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1">
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
-                            <span>Tahapan Sub-Pekerjaan (Klik untuk mengubah progres):</span>
+                            <span>Tahapan Checklist:</span>
                           </p>
-                          <Link
-                            href={`/tasks/${task.id}`}
-                            className="text-[11px] text-[#DF3B68] hover:underline font-semibold"
-                          >
-                            + Kelola Detail Sub-tugas
+                          <Link href={`/tasks/${task.id}`} className="text-[10px] text-[#DF3B68] font-bold hover:underline">
+                            Detail &rarr;
                           </Link>
                         </div>
 
                         {!task.subtasks || task.subtasks.length === 0 ? (
-                          <div className="p-3 bg-white rounded-xl border border-stone-200 text-xs text-stone-400 italic">
-                            Belum ada sub-pekerjaan yang direkam untuk tugas ini.
-                          </div>
+                          <p className="text-xs text-stone-400 dark:text-slate-500 italic py-2 text-center">
+                            Belum ada tahapan sub-pekerjaan.
+                          </p>
                         ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-1.5">
                             {task.subtasks.map((st, idx) => {
                               const isUpdating = updatingSubtaskId === st.id;
 
@@ -699,29 +938,28 @@ function TasksContent() {
                                   key={st.id || idx}
                                   disabled={isUpdating}
                                   onClick={() => handleToggleSubtask(st.id, st.is_completed, task.id)}
-                                  className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all text-left group cursor-pointer ${
+                                  className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition-all text-left ${
                                     st.is_completed
-                                      ? 'bg-emerald-50/70 border-emerald-300 text-emerald-900 shadow-2xs hover:bg-emerald-100/70'
-                                      : 'bg-white border-stone-200 text-stone-800 hover:border-[#DF3B68]/40 hover:bg-rose-50/30'
+                                      ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-300'
+                                      : 'bg-white dark:bg-slate-800 border-stone-200 dark:border-slate-700 text-stone-800 dark:text-slate-200'
                                   }`}
-                                  title="Klik untuk menyelesaikan/membatalkan sub-tugas ini"
                                 >
                                   <div className="flex items-center gap-2 truncate flex-1 min-w-0">
                                     {isUpdating ? (
                                       <Loader2 className="w-4 h-4 text-[#DF3B68] animate-spin shrink-0" />
                                     ) : st.is_completed ? (
-                                      <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0 group-hover:scale-110 transition-transform" />
+                                      <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                     ) : (
-                                      <Square className="w-4 h-4 text-stone-400 shrink-0 group-hover:text-[#DF3B68] group-hover:scale-110 transition-transform" />
+                                      <Square className="w-4 h-4 text-stone-400 dark:text-slate-500 shrink-0" />
                                     )}
-                                    <span className={`truncate font-medium ${st.is_completed ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                                    <span className={`truncate text-xs font-medium ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500' : 'text-stone-800 dark:text-slate-200'}`}>
                                       {idx + 1}. {st.title}
                                     </span>
                                   </div>
 
                                   {st.deadline && (
-                                    <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
-                                      Batas: {st.deadline}
+                                    <span className="shrink-0 text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
+                                      {st.deadline}
                                     </span>
                                   )}
                                 </button>
@@ -730,12 +968,11 @@ function TasksContent() {
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
-
-                </div>
-              );
-            })}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -745,7 +982,7 @@ function TasksContent() {
 
 export default function TasksPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm text-stone-400">Memuat...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-sm text-stone-400 dark:text-slate-500">Memuat...</div>}>
       <TasksContent />
     </Suspense>
   );
