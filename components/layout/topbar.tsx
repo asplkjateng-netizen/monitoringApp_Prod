@@ -22,7 +22,6 @@ import {
   Sun,
   Moon
 } from 'lucide-react';
-import { useTheme } from 'next-themes';
 import { createClient } from '@/lib/supabase/client';
 import { NotificationBell } from './notification-bell';
 
@@ -226,9 +225,9 @@ function TopBarContent({ onToggleMobileMenu }: TopBarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const supabase = createClient();
-  const { theme, setTheme, resolvedTheme } = useTheme();
 
   const [mounted, setMounted] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
@@ -239,8 +238,34 @@ function TopBarContent({ onToggleMobileMenu }: TopBarProps) {
   const activePeriod = searchParams?.get('period') || 'ALL';
   const selectedPeriodObj = PERIOD_OPTIONS.find((p) => p.id === activePeriod) || PERIOD_OPTIONS[0];
 
+  // Native Zero-Dependency Theme Engine
   useEffect(() => {
     setMounted(true);
+    const savedTheme = localStorage.getItem('gov_theme');
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const shouldBeDark = savedTheme ? savedTheme === 'dark' : systemPrefersDark;
+
+    setIsDarkMode(shouldBeDark);
+    if (shouldBeDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
+    if (nextMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('gov_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('gov_theme', 'light');
+    }
+  };
+
+  useEffect(() => {
     async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -336,16 +361,16 @@ function TopBarContent({ onToggleMobileMenu }: TopBarProps) {
 
         {/* Kanan: Theme Toggle + Bantuan + Dropdown Periode + Notif + Profil */}
         <div className="flex items-center gap-1.5 sm:gap-2.5">
-          {/* Theme Toggle (Light / Dark) */}
+          {/* Native Theme Switcher (Light / Dark) */}
           <button
             type="button"
-            onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+            onClick={toggleTheme}
             className="flex items-center justify-center w-8 h-8 rounded-full bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-800 text-stone-600 dark:text-slate-300 hover:text-[#DF3B68] dark:hover:text-[#F43F5E] hover:border-[#DF3B68]/30 transition-colors shadow-xs"
             title="Ganti Mode Tampilan (Terang / Gelap)"
             aria-label="Toggle Mode Gelap"
           >
             {mounted ? (
-              resolvedTheme === 'dark' ? (
+              isDarkMode ? (
                 <Sun className="w-4 h-4 text-amber-400" />
               ) : (
                 <Moon className="w-4 h-4 text-stone-600" />
