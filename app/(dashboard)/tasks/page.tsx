@@ -9,27 +9,33 @@ import {
   Calendar, 
   CheckCircle2, 
   AlertCircle, 
-  ExternalLink,
-  Building2,
-  FileText,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  CheckSquare,
-  Square,
-  Layers,
-  BookOpen,
-  Loader2,
-  Tag,
-  Wrench,
+  ExternalLink, 
+  Building2, 
+  FileText, 
+  ChevronDown, 
+  ChevronUp, 
+  CheckSquare, 
+  Square, 
+  Layers, 
+  BookOpen, 
+  Loader2, 
+  Tag, 
+  Wrench, 
   ListCollapse,
-  FolderOpen
+  User
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface LinkItem {
   name: string;
   url: string;
+}
+
+interface SubtaskPicRelation {
+  user_id: string;
+  profiles?: {
+    full_name: string;
+  } | null;
 }
 
 interface SubtaskItem {
@@ -39,6 +45,7 @@ interface SubtaskItem {
   is_completed: boolean;
   deadline?: string | null;
   custom_evidence_link?: string;
+  subtask_pics?: SubtaskPicRelation[];
 }
 
 interface TaskItem {
@@ -76,22 +83,22 @@ interface UnitOption {
   level: string;
 }
 
-// -------------------------------------------------------------
-// KOMPONEN PARSER DESKRIPSI ALA NOTION / GOOGLE DOCS (COLLAPSIBLE H1 + DAFTAR ISI)
-// -------------------------------------------------------------
 interface DocSection {
   id: string;
   title: string;
   content: string;
 }
 
+// -------------------------------------------------------------
+// KOMPONEN DAFTAR ISI INTERAKTIF RINGKAS (HIDE & SHOW ANTI-PANJANG)
+// -------------------------------------------------------------
 function NotionDocViewer({ rawContent }: { rawContent: string }) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
   const sections: DocSection[] = useMemo(() => {
     if (!rawContent || !rawContent.trim()) return [];
 
-    // Jika mengandung tag H1 / H2 dari editor rich text
+    // 1. Deteksi Tag H1 / H2 dari Editor Rich Text
     if (rawContent.includes('<h1') || rawContent.includes('<h2')) {
       const parts = rawContent.split(/<h[12][^>]*>/i);
       const result: DocSection[] = [];
@@ -108,10 +115,9 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
             content: content
           });
         } else if (index === 0 && part.trim()) {
-          // Konten awal sebelum heading pertama
           result.push({
             id: `sec-intro`,
-            title: 'Pengantar / Ringkasan',
+            title: 'Pengantar',
             content: part
           });
         }
@@ -119,7 +125,7 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
       return result;
     }
 
-    // Fallback: Mendeteksi format teks kapital seperti gambar (cth: "WAKTU PELAKSANAAN :", "RUANG LINGKUP :")
+    // 2. Deteksi Pola Judul Huruf Kapital (cth: "WAKTU PELAKSANAAN :", "RUANG LINGKUP :")
     const lines = rawContent.split('\n');
     const result: DocSection[] = [];
     let currentTitle = '';
@@ -130,7 +136,6 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
       const line = lines[i];
       const trimmed = line.trim();
 
-      // Cek apakah baris ini berupa judul bab kapital atau diakhiri titik dua / garis pemisah
       const isHeadingPattern = 
         (trimmed.endsWith(':') && trimmed.length < 60 && !trimmed.startsWith('http')) ||
         (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) ||
@@ -140,13 +145,12 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
         if (currentTitle || currentBuffer.length > 0) {
           result.push({
             id: `sec-${sectionIdx++}`,
-            title: currentTitle || 'Ringkasan Awal',
+            title: currentTitle || 'Pengantar',
             content: currentBuffer.join('\n').trim()
           });
           currentBuffer = [];
         }
         currentTitle = trimmed.replace(/:$/, '').replace(/-+$/, '').trim();
-        // Lewati baris strip di bawahnya jika ada
         if (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) {
           i++;
         }
@@ -158,12 +162,11 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
     if (currentTitle || currentBuffer.length > 0) {
       result.push({
         id: `sec-${sectionIdx++}`,
-        title: currentTitle || 'Uraian Dokumen',
+        title: currentTitle || 'Uraian',
         content: currentBuffer.join('\n').trim()
       });
     }
 
-    // Jika tidak terdeteksi pola apapun, kembalikan 1 seksi utuh
     if (result.length === 0) {
       return [{ id: 'sec-all', title: 'Rincian Petunjuk Teknis', content: rawContent }];
     }
@@ -171,32 +174,7 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
     return result;
   }, [rawContent]);
 
-  // Buka seksi pertama secara otomatis saat awal muat
-  useEffect(() => {
-    if (sections.length > 0) {
-      const initial: Record<string, boolean> = {};
-      sections.forEach((sec, idx) => {
-        initial[sec.id] = idx === 0; // Buka seksi pertama saja secara default
-      });
-      setOpenSections(initial);
-    }
-  }, [sections]);
-
-  const toggleSection = (id: string) => {
-    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const expandAll = () => {
-    const allOpen: Record<string, boolean> = {};
-    sections.forEach((s) => (allOpen[s.id] = true));
-    setOpenSections(allOpen);
-  };
-
-  const collapseAll = () => {
-    setOpenSections({});
-  };
-
-  if (sections.length <= 1 && sections[0]?.title === 'Uraian Dokumen') {
+  if (sections.length <= 1 && sections[0]?.title === 'Rincian Petunjuk Teknis') {
     return (
       <div className="p-3.5 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/80 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
         {rawContent.includes('<') && rawContent.includes('>') ? (
@@ -208,111 +186,76 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
     );
   }
 
+  const activeSection = sections.find((s) => s.id === activeSectionId);
+
   return (
-    <div className="space-y-3">
-      {/* DAFTAR ISI INTERAKTIF (TABLE OF CONTENTS) */}
+    <div className="space-y-2.5">
+      {/* DAFTAR ISI CHIPS / TABS SAJA */}
       <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/90 dark:border-slate-700 shadow-2xs">
         <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700/60 text-xs">
           <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
             <ListCollapse className="w-3.5 h-3.5 text-[#DF3B68]" />
             <span>Daftar Isi Petunjuk Teknis ({sections.length} Bab)</span>
           </div>
-          <div className="flex items-center gap-2 text-[11px]">
-            <button
-              type="button"
-              onClick={expandAll}
-              className="text-stone-500 hover:text-stone-900 dark:hover:text-white font-medium"
-            >
-              Buka Semua
-            </button>
-            <span className="text-stone-300 dark:text-slate-600">•</span>
-            <button
-              type="button"
-              onClick={collapseAll}
-              className="text-stone-500 hover:text-stone-900 dark:hover:text-white font-medium"
-            >
-              Tutup Semua
-            </button>
-          </div>
+          <span className="text-[11px] text-stone-400">
+            {activeSectionId ? 'Klik bab aktif untuk menutup' : 'Klik salah satu bab untuk membuka isi'}
+          </span>
         </div>
 
-        {/* Chips Daftar Isi yang bisa langsung diklik */}
+        {/* Tombol Bab (Klik untuk Buka/Tutup) */}
         <div className="flex flex-wrap gap-1.5 pt-2">
           {sections.map((sec, idx) => {
-            const isOpen = !!openSections[sec.id];
+            const isActive = activeSectionId === sec.id;
             return (
               <button
                 type="button"
                 key={sec.id}
-                onClick={() => {
-                  setOpenSections((prev) => ({ ...prev, [sec.id]: true }));
-                  const el = document.getElementById(`heading-${sec.id}`);
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  isOpen
-                    ? 'bg-[#DF3B68]/10 text-[#DF3B68] border border-[#DF3B68]/30 font-bold'
-                    : 'bg-stone-50 dark:bg-slate-700/50 text-stone-600 dark:text-slate-300 hover:bg-stone-100 border border-stone-200/70 dark:border-slate-700'
+                onClick={() => setActiveSectionId(isActive ? null : sec.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-2xs ${
+                  isActive
+                    ? 'bg-[#DF3B68] text-white font-bold ring-2 ring-[#DF3B68]/30 shadow-xs'
+                    : 'bg-stone-50 dark:bg-slate-700/60 text-stone-700 dark:text-slate-200 hover:bg-stone-100 dark:hover:bg-slate-700 border border-stone-200/70 dark:border-slate-700'
                 }`}
               >
-                <span className="text-[10px] opacity-60">{idx + 1}.</span>
+                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400'}`}>{idx + 1}.</span>
                 <span>{sec.title}</span>
+                <span className="text-[10px] ml-0.5 opacity-80">{isActive ? '▲' : '▼'}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* SEKSI ACCORDION PER BAB ALA NOTION */}
-      <div className="space-y-2">
-        {sections.map((sec, idx) => {
-          const isOpen = !!openSections[sec.id];
-
-          return (
-            <div
-              key={sec.id}
-              id={`heading-${sec.id}`}
-              className="border border-stone-200/90 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-800 shadow-2xs transition-all"
+      {/* KONTEN MUNCUL DI BAWAH DAFTAR ISI SAAT DIKLIK (HIDE & SHOW) */}
+      {activeSection && (
+        <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
+          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700">
+            <p className="font-extrabold text-[#DF3B68] text-xs uppercase tracking-wide flex items-center gap-1.5">
+              <span>📖 {activeSection.title}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveSectionId(null)}
+              className="text-[11px] text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 underline"
             >
-              <button
-                type="button"
-                onClick={() => toggleSection(sec.id)}
-                className={`w-full p-3 text-left flex items-center justify-between gap-3 text-xs font-bold transition-colors ${
-                  isOpen
-                    ? 'bg-stone-50/80 dark:bg-slate-750 text-stone-900 dark:text-white border-b border-stone-100 dark:border-slate-700'
-                    : 'text-stone-700 dark:text-slate-200 hover:bg-stone-50 dark:hover:bg-slate-750'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <div className={`p-1 rounded-md transition-transform ${isOpen ? 'text-[#DF3B68]' : 'text-stone-400'}`}>
-                    {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </div>
-                  <span className="text-stone-400 dark:text-slate-500 font-mono text-[11px]">{idx + 1}.</span>
-                  <span className="truncate tracking-tight uppercase text-[11px] sm:text-xs">{sec.title}</span>
-                </div>
-                <span className="text-[10px] font-normal text-stone-400 dark:text-slate-500 shrink-0">
-                  {isOpen ? 'Tutup Konten' : 'Lihat Isi'}
-                </span>
-              </button>
+              Tutup Uraian
+            </button>
+          </div>
 
-              {isOpen && (
-                <div className="p-3.5 bg-white dark:bg-slate-800 text-xs text-stone-700 dark:text-slate-200 leading-relaxed animate-in fade-in duration-150">
-                  {sec.content.includes('<') && sec.content.includes('>') ? (
-                    <div 
-                      className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
-                      dangerouslySetInnerHTML={{ __html: sec.content }}
-                    />
-                  ) : (
-                    <div className="whitespace-pre-wrap font-sans leading-relaxed">
-                      {sec.content}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+          <div className="text-xs text-stone-800 dark:text-slate-200 leading-relaxed pt-1">
+            {activeSection.content.includes('<') && activeSection.content.includes('>') ? (
+              <div 
+                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
+                dangerouslySetInnerHTML={{ __html: activeSection.content }}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap leading-relaxed font-sans">
+                {activeSection.content}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -399,7 +342,17 @@ function TasksContent() {
     try {
       let query = supabase
         .from('tasks')
-        .select('*, unit:units(id, name, level), subtasks(*)')
+        .select(`
+          *,
+          unit:units(id, name, level),
+          subtasks(
+            *,
+            subtask_pics(
+              user_id,
+              profiles(full_name)
+            )
+          )
+        `)
         .order('deadline', { ascending: true });
 
       if (filterUnit === 'MY_UNIT' && myUnitId) {
@@ -980,7 +933,7 @@ function TasksContent() {
                           </div>
                         )}
 
-                        {/* 3. PARSER NOTION / GOOGLE DOCS UNTUK PETUNJUK TEKNIS */}
+                        {/* 3. PARSER NOTION UNTUK PETUNJUK TEKNIS (HIDE & SHOW) */}
                         {task.description && (
                           <div className="pt-1">
                             <NotionDocViewer rawContent={task.description} />
@@ -989,7 +942,7 @@ function TasksContent() {
                       </div>
                     )}
 
-                    {/* Accordion Subtasks Desktop */}
+                    {/* Accordion Subtasks Desktop dengan Info PIC */}
                     {isSubExpanded && (
                       <div className="px-5 pb-5 pt-2 border-t border-stone-100 dark:border-slate-800 bg-stone-50/50 dark:bg-slate-850 space-y-3 animate-in fade-in duration-150">
                         <div className="space-y-1.5">
@@ -1014,6 +967,9 @@ function TasksContent() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {task.subtasks.map((st, idx) => {
                                 const isUpdating = updatingSubtaskId === st.id;
+                                const subPicName = (st.subtask_pics && st.subtask_pics.length > 0)
+                                  ? st.subtask_pics[0]?.profiles?.full_name
+                                  : null;
 
                                 return (
                                   <button
@@ -1040,11 +996,19 @@ function TasksContent() {
                                       </span>
                                     </div>
 
-                                    {st.deadline && (
-                                      <span className="shrink-0 text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
-                                        Batas: {st.deadline}
-                                      </span>
-                                    )}
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {subPicName && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                          <User className="w-2.5 h-2.5" />
+                                          <span className="max-w-[80px] truncate">{subPicName}</span>
+                                        </span>
+                                      )}
+                                      {st.deadline && (
+                                        <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
+                                          Batas: {st.deadline}
+                                        </span>
+                                      )}
+                                    </div>
                                   </button>
                                 );
                               })}
@@ -1164,7 +1128,7 @@ function TasksContent() {
                           }`}
                         >
                           <BookOpen className="w-3 h-3 text-amber-600" />
-                          <span>Dasar Hukum & Petunjuk</span>
+                          <span>Dasar Hukum</span>
                           {isDescExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                         </button>
                       )}
