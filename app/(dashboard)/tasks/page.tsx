@@ -22,7 +22,8 @@ import {
   Tag, 
   Wrench, 
   ListCollapse,
-  User
+  User,
+  History
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -44,6 +45,7 @@ interface SubtaskItem {
   title: string;
   is_completed: boolean;
   deadline?: string | null;
+  order_index?: number;
   custom_evidence_link?: string;
   subtask_pics?: SubtaskPicRelation[];
 }
@@ -90,16 +92,13 @@ interface DocSection {
   content: string;
 }
 
-// -------------------------------------------------------------
-// KOMPONEN DAFTAR ISI INTERAKTIF RINGKAS (HIDE & SHOW ANTI-PANJANG)
-// -------------------------------------------------------------
+// KOMPONEN DAFTAR ISI INTERAKTIF (NOTION-STYLE HIDE & SHOW)
 function NotionDocViewer({ rawContent }: { rawContent: string }) {
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
   const sections: DocSection[] = useMemo(() => {
     if (!rawContent || !rawContent.trim()) return [];
 
-    // 1. Deteksi Tag H1 / H2 dari Editor Rich Text
     if (rawContent.includes('<h1') || rawContent.includes('<h2')) {
       const parts = rawContent.split(/<h[12][^>]*>/i);
       const result: DocSection[] = [];
@@ -126,7 +125,6 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
       return result;
     }
 
-    // 2. Deteksi Pola Judul Huruf Kapital (cth: "WAKTU PELAKSANAAN :", "RUANG LINGKUP :")
     const lines = rawContent.split('\n');
     const result: DocSection[] = [];
     let currentTitle = '';
@@ -191,7 +189,6 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
   return (
     <div className="space-y-2.5">
-      {/* DAFTAR ISI CHIPS / TABS SAJA */}
       <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/90 dark:border-slate-700 shadow-2xs">
         <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700/60 text-xs">
           <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
@@ -203,7 +200,6 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
           </span>
         </div>
 
-        {/* Tombol Bab (Klik untuk Buka/Tutup) */}
         <div className="flex flex-wrap gap-1.5 pt-2">
           {sections.map((sec, idx) => {
             const isActive = activeSectionId === sec.id;
@@ -227,7 +223,6 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
         </div>
       </div>
 
-      {/* KONTEN MUNCUL DI BAWAH DAFTAR ISI SAAT DIKLIK (HIDE & SHOW) */}
       {activeSection && (
         <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
           <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700">
@@ -263,14 +258,14 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
 function TasksContent() {
   const searchParams = useSearchParams();
-  const initialStatus = searchParams.get('status') || 'ALL';
+  const initialStatus = searchParams.get('status') || 'ACTIVE';
   const periodParam = searchParams.get('period') || 'ALL';
 
   const supabase = createClient();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatus === 'ALL' ? 'ACTIVE' : initialStatus);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
@@ -284,7 +279,8 @@ function TasksContent() {
 
   useEffect(() => {
     if (searchParams.get('status')) {
-      setStatusFilter(searchParams.get('status')!);
+      const qStatus = searchParams.get('status')!;
+      setStatusFilter(qStatus === 'ALL' ? 'ACTIVE' : qStatus);
     }
   }, [searchParams]);
 
@@ -364,7 +360,11 @@ function TasksContent() {
 
       const { data, error } = await query;
       if (!error && data) {
-        setTasks(data as TaskItem[]);
+        const sortedData = (data as TaskItem[]).map((t) => ({
+          ...t,
+          subtasks: (t.subtasks || []).sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
+        }));
+        setTasks(sortedData);
       }
     } catch (e) {
       console.error('Exception on fetchTasks:', e);
@@ -508,6 +508,7 @@ function TasksContent() {
     return [];
   };
 
+  // LOGIKA FILTER TUGAS: Tugas Selesai otomatis masuk ke tab Riwayat (SELESAI)
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
       t.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -521,15 +522,17 @@ function TasksContent() {
       if (cat !== categoryFilter) return false;
     }
 
-    if (statusFilter !== 'ALL') {
-      if (statusFilter === 'KRITIS') {
-        const diffDays = getDaysDiff(t.deadline);
-        const threshold = t.critical_days_threshold || 3;
-        const isKritis = t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && diffDays <= threshold);
-        if (!isKritis) return false;
-      } else if (t.status !== statusFilter) {
-        return false;
-      }
+    if (statusFilter === 'ACTIVE' || statusFilter === 'ALL') {
+      if (t.status === 'SELESAI') return false;
+    } else if (statusFilter === 'RIWAYAT' || statusFilter === 'SELESAI') {
+      if (t.status !== 'SELESAI') return false;
+    } else if (statusFilter === 'KRITIS') {
+      const diffDays = getDaysDiff(t.deadline);
+      const threshold = t.critical_days_threshold || 3;
+      const isKritis = t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && diffDays <= threshold);
+      if (!isKritis) return false;
+    } else if (t.status !== statusFilter) {
+      return false;
     }
 
     const taskMonth = getTaskMonth(t);
@@ -635,7 +638,7 @@ function TasksContent() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Daftar Pekerjaan</h1>
           <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1">
-            Pemantauan progres, deadline pasti, petunjuk berstruktur daftar isi, multi-regulasi, dan link tools.
+            Pemantauan tugas aktif berjenjang. Tugas yang tuntas otomatis diarsipkan ke tab Riwayat.
           </p>
         </div>
         <Link
@@ -684,25 +687,30 @@ function TasksContent() {
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-slate-800">
           <div className="flex items-center gap-1 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 scrollbar-none">
             {[
-              { id: 'ALL', label: 'Semua' },
+              { id: 'ACTIVE', label: 'Semua Aktif' },
               { id: 'KRITIS', label: 'Kritis (H-X)' },
               { id: 'BELUM_DIKERJAKAN', label: 'Belum Mulai' },
               { id: 'ON_PROGRESS', label: 'Proses' },
               { id: 'TERKENDALA', label: 'Terkendala' },
-              { id: 'SELESAI', label: 'Selesai' },
+              { id: 'RIWAYAT', label: 'Riwayat (Selesai)', isHistory: true },
             ].map((tab) => {
-              const isActive = statusFilter === tab.id;
+              const isActive = statusFilter === tab.id || (tab.id === 'ACTIVE' && statusFilter === 'ALL');
               return (
                 <button
                   key={tab.id}
                   onClick={() => setStatusFilter(tab.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
                     isActive
-                      ? 'bg-[#DF3B68] text-white shadow-xs'
-                      : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
+                      ? tab.isHistory 
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-[#DF3B68] text-white shadow-xs'
+                      : tab.isHistory
+                        ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800/80'
+                        : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
                   }`}
                 >
-                  {tab.label}
+                  {tab.isHistory && <History className="w-3.5 h-3.5" />}
+                  <span>{tab.label}</span>
                 </button>
               );
             })}
@@ -742,11 +750,22 @@ function TasksContent() {
             <span>Memuat daftar tugas...</span>
           </div>
         ) : filteredTasks.length === 0 ? (
-          <div className="py-20 text-center px-4">
-            <p className="text-stone-600 dark:text-slate-300 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
-            <p className="text-stone-400 dark:text-slate-500 text-xs mt-1">
-              Coba sesuaikan saringan status, kata kunci, atau jenis pekerjaan.
-            </p>
+          <div className="py-20 text-center px-4 space-y-1.5">
+            {statusFilter === 'RIWAYAT' || statusFilter === 'SELESAI' ? (
+              <>
+                <p className="text-stone-700 dark:text-slate-200 font-bold text-sm">Belum ada riwayat tugas selesai</p>
+                <p className="text-stone-400 dark:text-slate-500 text-xs">
+                  Tugas yang progresnya telah mencapai 100% dan berstatus &quot;Selesai&quot; akan otomatis masuk ke sini.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-stone-700 dark:text-slate-200 font-bold text-sm">Tidak ada tugas aktif pada filter ini</p>
+                <p className="text-stone-400 dark:text-slate-500 text-xs">
+                  Tugas yang sudah selesai otomatis tersimpan di tab <strong>&quot;Riwayat (Selesai)&quot;</strong>.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div>
@@ -771,11 +790,9 @@ function TasksContent() {
                   <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
                     <div className="p-5 flex items-center justify-between gap-4">
                       <div className="space-y-1.5 flex-1 min-w-0">
-                        {/* BARIS LENCANA STATUS DENGAN WARNA MERAH BATA TEGAS */}
                         <div className="flex flex-wrap items-center gap-2">
                           {renderCategoryBadge(task.category)}
 
-                          {/* LENCANA TANGGAL DEADLINE (WARNA MERAH BATA DINAS) */}
                           <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-[#DF3B68] text-white px-2.5 py-0.5 rounded-full shadow-2xs">
                             <Calendar className="w-3.5 h-3.5 text-white/90" />
                             <span>Tenggat: {formattedDeadline}</span>
@@ -796,12 +813,10 @@ function TasksContent() {
                           </span>
                         </div>
 
-                        {/* JUDUL TUGAS */}
                         <h3 className="font-bold text-stone-900 dark:text-slate-100 text-base leading-snug">
                           {task.title}
                         </h3>
 
-                        {/* DESKRIPSI SINGKAT MANUAL DARI INPUT FORMULIR */}
                         {task.short_description && (
                           <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed pt-0.5 font-normal">
                             {task.short_description}
@@ -825,7 +840,6 @@ function TasksContent() {
                         </div>
                       </div>
 
-                      {/* TOMBOL AKSI */}
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
                         {(task.description || regList.length > 0 || toolsList.length > 0) && (
                           <button
@@ -857,7 +871,6 @@ function TasksContent() {
                           {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
 
-                        {/* MULTI-TOOLS BADGE LINK */}
                         {toolsList.length > 0 && (
                           <div className="flex items-center gap-1">
                             {toolsList.map((tool, idx) => (
@@ -899,10 +912,8 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* ACCORDION DETAIL: MULTI-REGULASI, TOOLS, & NOTION DOC VIEWER */}
                     {isDescExpanded && (
                       <div className="px-5 pb-5 pt-3 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-3.5 animate-in fade-in duration-150">
-                        {/* 1. Baris Multi-Regulasi */}
                         {regList.length > 0 && (
                           <div className="flex flex-wrap items-center gap-2 text-xs">
                             <span className="font-bold text-amber-900 dark:text-amber-400 flex items-center gap-1">
@@ -927,7 +938,6 @@ function TasksContent() {
                           </div>
                         )}
 
-                        {/* 2. Baris Multi-Tools */}
                         {toolsList.length > 0 && (
                           <div className="flex flex-wrap items-center gap-2 text-xs pt-0.5">
                             <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
@@ -948,7 +958,6 @@ function TasksContent() {
                           </div>
                         )}
 
-                        {/* 3. PARSER NOTION UNTUK PETUNJUK TEKNIS (HIDE & SHOW) */}
                         {task.description && (
                           <div className="pt-1">
                             <NotionDocViewer rawContent={task.description} />
@@ -957,7 +966,6 @@ function TasksContent() {
                       </div>
                     )}
 
-                    {/* Accordion Subtasks Desktop dengan Info PIC */}
                     {isSubExpanded && (
                       <div className="px-5 pb-5 pt-2 border-t border-stone-100 dark:border-slate-800 bg-stone-50/50 dark:bg-slate-850 space-y-3 animate-in fade-in duration-150">
                         <div className="space-y-1.5">
@@ -970,7 +978,7 @@ function TasksContent() {
                               href={`/tasks/${task.id}`}
                               className="text-[11px] text-[#DF3B68] hover:underline font-semibold"
                             >
-                              + Kelola Detail Sub-tugas
+                              + Kelola & Urutkan Sub-tugas
                             </Link>
                           </div>
 
@@ -1056,11 +1064,9 @@ function TasksContent() {
 
                 return (
                   <div key={task.id} className="p-4 space-y-3.5 transition-colors">
-                    {/* BARIS LENCANA STATUS MOBILE DENGAN TANGGAL DEADLINE MERAH BATA */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {renderCategoryBadge(task.category)}
 
-                      {/* LENCANA TANGGAL DEADLINE MOBILE (MERAH BATA) */}
                       <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold bg-[#DF3B68] text-white px-2 py-0.5 rounded-md">
                         <Calendar className="w-3 h-3 text-white/90" />
                         <span>{formattedDeadline}</span>
@@ -1078,7 +1084,6 @@ function TasksContent() {
                         {task.title}
                       </h3>
 
-                      {/* DESKRIPSI SINGKAT MANUAL DARI INPUT FORMULIR */}
                       {task.short_description && (
                         <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed font-normal">
                           {task.short_description}
@@ -1179,7 +1184,6 @@ function TasksContent() {
                       )}
                     </div>
 
-                    {/* ACCORDION MOBILE DENGAN NOTION DOC VIEWER */}
                     {isDescExpanded && (
                       <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-3 text-xs">
                         {regList.length > 0 && (
