@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -17,11 +17,14 @@ import {
   Loader2, 
   Edit3, 
   CalendarDays, 
+  Calendar,
   Info, 
   BookOpen, 
   Share2,
   Wrench,
-  FileText
+  FileText,
+  ListCollapse,
+  User
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { TaskShareModal } from '@/components/tasks/task-share-modal';
@@ -29,6 +32,187 @@ import { TaskShareModal } from '@/components/tasks/task-share-modal';
 interface LinkItem {
   name: string;
   url: string;
+}
+
+interface StaffProfile {
+  id: string;
+  full_name: string;
+  nip: string;
+  role: string;
+}
+
+interface DocSection {
+  id: string;
+  title: string;
+  content: string;
+}
+
+// -------------------------------------------------------------
+// KOMPONEN DAFTAR ISI INTERAKTIF RINGKAS (HIDE & SHOW ANTI-PANJANG)
+// -------------------------------------------------------------
+function NotionDocViewer({ rawContent }: { rawContent: string }) {
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+
+  const sections: DocSection[] = useMemo(() => {
+    if (!rawContent || !rawContent.trim()) return [];
+
+    // Deteksi Tag H1 / H2 dari Editor Rich Text
+    if (rawContent.includes('<h1') || rawContent.includes('<h2')) {
+      const parts = rawContent.split(/<h[12][^>]*>/i);
+      const result: DocSection[] = [];
+
+      parts.forEach((part, index) => {
+        if (!part.trim()) return;
+        const closingIdx = part.search(/<\/h[12]>/i);
+        if (closingIdx !== -1) {
+          const title = part.substring(0, closingIdx).replace(/<[^>]+>/g, '').trim();
+          const content = part.substring(closingIdx + 5).trim();
+          result.push({
+            id: `sec-${index}`,
+            title: title || `Bagian ${index + 1}`,
+            content: content
+          });
+        } else if (index === 0 && part.trim()) {
+          result.push({
+            id: `sec-intro`,
+            title: 'Pengantar',
+            content: part
+          });
+        }
+      });
+      return result;
+    }
+
+    // Deteksi Pola Judul Huruf Kapital (cth: "WAKTU PELAKSANAAN :", "RUANG LINGKUP :")
+    const lines = rawContent.split('\n');
+    const result: DocSection[] = [];
+    let currentTitle = '';
+    let currentBuffer: string[] = [];
+    let sectionIdx = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      const isHeadingPattern = 
+        (trimmed.endsWith(':') && trimmed.length < 60 && !trimmed.startsWith('http')) ||
+        (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) ||
+        /^[A-Z0-9\s.,()-]{4,45}:$/.test(trimmed);
+
+      if (isHeadingPattern) {
+        if (currentTitle || currentBuffer.length > 0) {
+          result.push({
+            id: `sec-${sectionIdx++}`,
+            title: currentTitle || 'Pengantar',
+            content: currentBuffer.join('\n').trim()
+          });
+          currentBuffer = [];
+        }
+        currentTitle = trimmed.replace(/:$/, '').replace(/-+$/, '').trim();
+        if (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) {
+          i++;
+        }
+      } else {
+        currentBuffer.push(line);
+      }
+    }
+
+    if (currentTitle || currentBuffer.length > 0) {
+      result.push({
+        id: `sec-${sectionIdx++}`,
+        title: currentTitle || 'Uraian',
+        content: currentBuffer.join('\n').trim()
+      });
+    }
+
+    if (result.length === 0) {
+      return [{ id: 'sec-all', title: 'Rincian Petunjuk Teknis', content: rawContent }];
+    }
+
+    return result;
+  }, [rawContent]);
+
+  if (sections.length <= 1 && sections[0]?.title === 'Rincian Petunjuk Teknis') {
+    return (
+      <div className="p-3.5 bg-stone-50/80 dark:bg-slate-800 rounded-2xl border border-stone-200/80 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
+        {rawContent.includes('<') && rawContent.includes('>') ? (
+          <div dangerouslySetInnerHTML={{ __html: rawContent }} />
+        ) : (
+          <div className="whitespace-pre-wrap">{rawContent}</div>
+        )}
+      </div>
+    );
+  }
+
+  const activeSection = sections.find((s) => s.id === activeSectionId);
+
+  return (
+    <div className="space-y-2.5">
+      <div className="p-3.5 bg-stone-50/90 dark:bg-slate-800 rounded-2xl border border-stone-200/90 dark:border-slate-700 shadow-2xs">
+        <div className="flex items-center justify-between pb-2 border-b border-stone-200/70 dark:border-slate-700/60 text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
+            <ListCollapse className="w-3.5 h-3.5 text-[#DF3B68]" />
+            <span>Daftar Isi Petunjuk Teknis ({sections.length} Bab)</span>
+          </div>
+          <span className="text-[11px] text-stone-400">
+            {activeSectionId ? 'Klik bab aktif untuk menutup' : 'Pilih bab untuk melihat rincian'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 pt-2">
+          {sections.map((sec, idx) => {
+            const isActive = activeSectionId === sec.id;
+            return (
+              <button
+                type="button"
+                key={sec.id}
+                onClick={() => setActiveSectionId(isActive ? null : sec.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-2xs ${
+                  isActive
+                    ? 'bg-[#DF3B68] text-white font-bold ring-2 ring-[#DF3B68]/30 shadow-xs'
+                    : 'bg-white dark:bg-slate-700/60 text-stone-700 dark:text-slate-200 hover:bg-stone-100 dark:hover:bg-slate-700 border border-stone-200 dark:border-slate-700'
+                }`}
+              >
+                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400'}`}>{idx + 1}.</span>
+                <span>{sec.title}</span>
+                <span className="text-[10px] ml-0.5 opacity-80">{isActive ? '▲' : '▼'}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeSection && (
+        <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
+          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700">
+            <p className="font-extrabold text-[#DF3B68] text-xs uppercase tracking-wide flex items-center gap-1.5">
+              <span>📖 {activeSection.title}</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveSectionId(null)}
+              className="text-[11px] text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 underline"
+            >
+              Tutup Uraian
+            </button>
+          </div>
+
+          <div className="text-xs text-stone-800 dark:text-slate-200 leading-relaxed pt-1">
+            {activeSection.content.includes('<') && activeSection.content.includes('>') ? (
+              <div 
+                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
+                dangerouslySetInnerHTML={{ __html: activeSection.content }}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap leading-relaxed font-sans">
+                {activeSection.content}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function TaskDetailPage() {
@@ -40,6 +224,7 @@ export default function TaskDetailPage() {
   const [task, setTask] = useState<any>(null);
   const [subtasks, setSubtasks] = useState<any[]>([]);
   const [pics, setPics] = useState<any[]>([]);
+  const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
   // State Modal Sharing Hub
@@ -48,6 +233,7 @@ export default function TaskDetailPage() {
   // States Tambah Subtask Baru
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newSubtaskDeadline, setNewSubtaskDeadline] = useState('');
+  const [newSubtaskPicId, setNewSubtaskPicId] = useState('');
   const [addingSubtask, setAddingSubtask] = useState(false);
 
   // States Form Kontrol Cepat & Status
@@ -93,10 +279,16 @@ export default function TaskDetailPage() {
     setEvidenceLinkInput(taskData.evidence_link || '');
     setKendalaInput(taskData.kendala_note || '');
 
-    // 2. Ambil Subtasks
+    // 2. Ambil Subtasks beserta relasi subtask_pics
     const { data: subData, error: subError } = await supabase
       .from('subtasks')
-      .select('*')
+      .select(`
+        *,
+        subtask_pics(
+          user_id,
+          profiles(id, full_name, role)
+        )
+      `)
       .eq('task_id', taskId)
       .order('created_at', { ascending: true });
 
@@ -106,13 +298,25 @@ export default function TaskDetailPage() {
       setSubtasks(subData || []);
     }
 
-    // 3. Ambil PIC
+    // 3. Ambil PIC Utama Tugas
     const { data: picData } = await supabase
       .from('task_pics')
       .select('profile:profiles(id, full_name, nip, role)')
       .eq('task_id', taskId);
 
     if (picData) setPics(picData.map((p: any) => p.profile));
+
+    // 4. Ambil Daftar Pegawai di Unit ini untuk opsi PIC subtask
+    if (taskData.unit_id) {
+      const { data: staffData } = await supabase
+        .from('profiles')
+        .select('id, full_name, nip, role')
+        .eq('unit_id', taskData.unit_id)
+        .eq('approval_status', 'APPROVED')
+        .order('full_name', { ascending: true });
+
+      if (staffData) setStaffList(staffData);
+    }
 
     setLoading(false);
   };
@@ -206,7 +410,7 @@ export default function TaskDetailPage() {
     setAddingSubtask(true);
     setErrorMsg('');
 
-    const { error } = await supabase
+    const { data: createdSubtask, error: subtaskError } = await supabase
       .from('subtasks')
       .insert({
         task_id: taskId,
@@ -214,16 +418,45 @@ export default function TaskDetailPage() {
         deadline: newSubtaskDeadline || null,
         is_completed: false,
         evidence_link_type: 'INHERIT',
-      });
+      })
+      .select('id')
+      .single();
 
-    if (error) {
-      setErrorMsg('Gagal menyimpan subtask: ' + error.message);
+    if (subtaskError || !createdSubtask) {
+      setErrorMsg('Gagal menyimpan subtask: ' + (subtaskError?.message || ''));
     } else {
+      // Jika PIC dipilih, rekam ke tabel subtask_pics
+      if (newSubtaskPicId) {
+        await supabase.from('subtask_pics').insert({
+          subtask_id: createdSubtask.id,
+          user_id: newSubtaskPicId,
+        });
+      }
+
       setNewSubtaskTitle('');
       setNewSubtaskDeadline('');
+      setNewSubtaskPicId('');
       await loadTaskDetails();
     }
     setAddingSubtask(false);
+  };
+
+  // Handler ubah / pilih PIC sub-tugas yang sudah ada
+  const handleUpdateSubtaskPic = async (subtaskId: string, targetPicId: string) => {
+    try {
+      await supabase.from('subtask_pics').delete().eq('subtask_id', subtaskId);
+
+      if (targetPicId) {
+        await supabase.from('subtask_pics').insert({
+          subtask_id: subtaskId,
+          user_id: targetPicId,
+        });
+      }
+
+      await loadTaskDetails();
+    } catch (err: any) {
+      setErrorMsg('Gagal memperbarui PIC tahapan: ' + err.message);
+    }
   };
 
   const handleDeleteSubtask = async (subtaskId: string) => {
@@ -380,6 +613,11 @@ export default function TaskDetailPage() {
 
   const regList = getRegulationsList();
   const toolsList = getToolsList();
+  const formattedDeadline = new Date(task.deadline).toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
 
   return (
     <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
@@ -462,6 +700,12 @@ export default function TaskDetailPage() {
       <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-5 transition-colors">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
+            {/* LENCANA TENGGAT TEGAS */}
+            <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3 py-1 rounded-full shadow-2xs">
+              <Calendar className="w-3.5 h-3.5 text-[#DF3B68]" />
+              <span>Tenggat: {formattedDeadline}</span>
+            </span>
+
             {getDeadlineStatusBadge()}
             <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 dark:bg-slate-800 text-stone-700 dark:text-slate-300 border-stone-200 dark:border-slate-700">
               Periode {task.period_type} {task.period_month ? `(Bulan ${task.period_month}/${task.period_year})` : ''}
@@ -487,7 +731,7 @@ export default function TaskDetailPage() {
           
           <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-slate-400 pt-1">
             <CalendarDays className="w-4 h-4 text-[#DF3B68]" />
-            <span className="font-semibold">Tenggat Waktu:</span>
+            <span className="font-semibold">Ubah Tenggat Waktu:</span>
             <input
               type="date"
               value={currentDeadline}
@@ -497,23 +741,10 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Petunjuk Teknis & Deskripsi */}
+        {/* Petunjuk Teknis & Deskripsi dengan NOTION DOC VIEWER */}
         {task.description && (
-          <div className="bg-stone-50/80 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-100 dark:border-slate-800 text-xs md:text-sm text-stone-700 dark:text-slate-200 leading-relaxed">
-            <p className="font-bold text-stone-900 dark:text-slate-100 mb-2 flex items-center gap-1.5 border-b border-stone-200/60 dark:border-slate-700/60 pb-1">
-              <FileText className="w-4 h-4 text-[#DF3B68]" />
-              Petunjuk Teknis & Deskripsi:
-            </p>
-            {task.description.includes('<') && task.description.includes('>') ? (
-              <div 
-                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
-                dangerouslySetInnerHTML={{ __html: task.description }}
-              />
-            ) : (
-              <div className="whitespace-pre-wrap leading-relaxed">
-                {task.description}
-              </div>
-            )}
+          <div className="pt-2">
+            <NotionDocViewer rawContent={task.description} />
           </div>
         )}
 
@@ -546,7 +777,7 @@ export default function TaskDetailPage() {
         {toolsList.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
             <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
-              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools:
+              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools & Kertas Kerja:
             </span>
             {toolsList.map((tool, idx) => (
               <a
@@ -554,7 +785,7 @@ export default function TaskDetailPage() {
                 href={tool.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 transition-colors font-medium shadow-2xs"
+                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 transition-colors font-semibold shadow-2xs"
               >
                 <span>{tool.name}</span>
                 <ExternalLink className="w-3 h-3 text-emerald-600" />
@@ -565,7 +796,7 @@ export default function TaskDetailPage() {
 
         {pics.length > 0 && (
           <div className="pt-1 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-stone-500 dark:text-slate-400">PIC Pelaksana:</span>
+            <span className="text-xs font-semibold text-stone-500 dark:text-slate-400">PIC Utama Tugas:</span>
             {pics.map((p) => (
               <span key={p.id} className="text-[11px] bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 px-2.5 py-0.5 rounded-full font-medium border border-stone-200 dark:border-slate-700">
                 {p.full_name} ({p.role})
@@ -595,36 +826,54 @@ export default function TaskDetailPage() {
         <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-4 transition-colors">
           <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
             <div>
-              <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan</h2>
-              <p className="text-xs text-stone-500 dark:text-slate-400">Centang tahapan untuk mengalkulasi progres otomatis & mengubah status.</p>
+              <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan & PIC</h2>
+              <p className="text-xs text-stone-500 dark:text-slate-400">Pilih PIC untuk tiap tahapan (opsional) atau tentukan kemudian.</p>
             </div>
             <span className="text-xs font-semibold text-stone-500 dark:text-slate-400 bg-stone-100 dark:bg-slate-800 px-2.5 py-1 rounded-full border border-stone-200 dark:border-slate-700">
               {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
             </span>
           </div>
 
-          {/* Form Tambah Subtask */}
-          <form onSubmit={handleAddSubtask} className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              placeholder="Ketik tahapan/sub-pekerjaan baru..."
-              value={newSubtaskTitle}
-              onChange={(e) => setNewSubtaskTitle(e.target.value)}
-              className="flex-1 px-3.5 py-2 text-xs bg-stone-50 dark:bg-slate-800 text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
-            />
-            <div className="flex items-center gap-1.5">
+          {/* Form Tambah Subtask dengan PIC Opsional */}
+          <form onSubmit={handleAddSubtask} className="flex flex-col gap-2 p-3 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-200 dark:border-slate-700">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="Ketik uraian tahapan sub-pekerjaan baru..."
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                className="flex-1 px-3 py-2 text-xs bg-white dark:bg-slate-800 text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Dropdown PIC Opsional */}
+              <select
+                value={newSubtaskPicId}
+                onChange={(e) => setNewSubtaskPicId(e.target.value)}
+                className="flex-1 min-w-[160px] px-2.5 py-2 text-xs bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700"
+              >
+                <option value="">-- Tanpa PIC (Kosong) --</option>
+                {staffList.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.full_name} ({staff.role})
+                  </option>
+                ))}
+              </select>
+
               <input
                 type="date"
                 max={currentDeadline || undefined}
                 value={newSubtaskDeadline}
                 onChange={(e) => setNewSubtaskDeadline(e.target.value)}
-                className="px-2.5 py-2 text-xs bg-stone-50 dark:bg-slate-800 text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700 font-mono"
+                className="px-2.5 py-2 text-xs bg-white dark:bg-slate-800 text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-slate-700 font-mono"
                 title="Batas waktu tahapan (opsional)"
               />
+
               <button
                 type="submit"
                 disabled={addingSubtask || !newSubtaskTitle.trim()}
-                className="px-4 py-2 bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl hover:bg-stone-800 disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1"
+                className="px-4 py-2 bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl hover:bg-stone-800 disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
               >
                 {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Tambah
@@ -632,44 +881,67 @@ export default function TaskDetailPage() {
             </div>
           </form>
 
-          {/* List Subtasks */}
+          {/* List Subtasks dengan Penyesuaian PIC Cepat */}
           <div className="divide-y divide-stone-100 dark:divide-slate-800 pt-1">
             {subtasks.length === 0 ? (
               <div className="py-8 text-center text-xs text-stone-400 dark:text-slate-500">
-                Belum ada tahapan sub-pekerjaan. Tambahkan tahapan di atas.
+                Belum ada tahapan sub-pekerjaan. Tambahkan tahapan pada formulir di atas.
               </div>
             ) : (
-              subtasks.map((st, idx) => (
-                <div key={st.id} className="py-3 flex items-center justify-between gap-3 group">
-                  <label className="flex items-center gap-3 cursor-pointer flex-1 select-none">
-                    <input
-                      type="checkbox"
-                      checked={st.is_completed}
-                      onChange={() => handleToggleSubtask(st.id, st.is_completed)}
-                      className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-700 cursor-pointer"
-                    />
-                    <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
-                      {idx + 1}. {st.title}
-                    </span>
-                  </label>
+              subtasks.map((st, idx) => {
+                const currentSubPicId = (st.subtask_pics && st.subtask_pics.length > 0)
+                  ? st.subtask_pics[0]?.user_id
+                  : '';
 
-                  <div className="flex items-center gap-2">
-                    {st.deadline && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
-                        Batas: {st.deadline}
+                return (
+                  <div key={st.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group">
+                    <label className="flex items-center gap-3 cursor-pointer flex-1 select-none">
+                      <input
+                        type="checkbox"
+                        checked={st.is_completed}
+                        onChange={() => handleToggleSubtask(st.id, st.is_completed)}
+                        className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-700 cursor-pointer"
+                      />
+                      <span className={`text-xs md:text-sm ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
+                        {idx + 1}. {st.title}
                       </span>
-                    )}
+                    </label>
 
-                    <button
-                      onClick={() => handleDeleteSubtask(st.id)}
-                      className="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-rose-600 transition-opacity"
-                      title="Hapus tahapan"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2 pl-7 sm:pl-0">
+                      {/* Dropdown Pengaturan / Pengubahan PIC Subtask Langsung */}
+                      <div className="relative">
+                        <select
+                          value={currentSubPicId}
+                          onChange={(e) => handleUpdateSubtaskPic(st.id, e.target.value)}
+                          className="text-[11px] font-semibold py-1 px-2 pr-6 rounded-lg border border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800 text-stone-700 dark:text-slate-300 max-w-[140px] truncate"
+                          title="Ubah PIC tahapan"
+                        >
+                          <option value="">-- Tanpa PIC --</option>
+                          {staffList.map((staff) => (
+                            <option key={staff.id} value={staff.id}>
+                              {staff.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {st.deadline && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
+                          Batas: {st.deadline}
+                        </span>
+                      )}
+
+                      <button
+                        onClick={() => handleDeleteSubtask(st.id)}
+                        className="p-1 text-stone-400 hover:text-rose-600 transition-colors"
+                        title="Hapus tahapan"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -714,7 +986,7 @@ export default function TaskDetailPage() {
                   href={task.evidence_link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-[#DF3B68] hover:underline mt-1.5"
+                  className="inline-flex items-center gap-1 text-[11px] text-[#DF3B68] hover:underline mt-1.5 font-semibold"
                 >
                   Buka Link Bukti Tersimpan <ExternalLink className="w-3 h-3" />
                 </a>
