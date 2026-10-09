@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { 
   BookOpen, 
@@ -45,6 +46,7 @@ interface TemplateItem {
 }
 
 export default function TusiCatalogPage() {
+  const router = useRouter();
   const supabase = createClient();
 
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
@@ -81,39 +83,64 @@ export default function TusiCatalogPage() {
 
   const loadUserAndTemplates = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    let currentTusi = 'UMUM';
-    let adminFlag = false;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      let currentTusi = 'UMUM';
+      let adminFlag = false;
 
-    if (user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, role, unit_id, unit:units(id, name, code, tusi_type)')
-        .eq('id', user.id)
-        .single();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, role, unit_id, unit:units(id, name, code, tusi_type)')
+          .eq('id', user.id)
+          .single();
 
-      if (profile) {
-        setCurrentUserProfile(profile);
-        currentTusi = (profile.unit as any)?.tusi_type || 'UMUM';
-        adminFlag = String(profile.role).toUpperCase() === 'SUPER_ADMIN';
-        
-        setUserTusiType(currentTusi);
-        setIsSuperAdmin(adminFlag);
-        setSelectedTusi(adminFlag ? 'ALL' : currentTusi);
+        if (profile) {
+          setCurrentUserProfile(profile);
+          currentTusi = (profile.unit as any)?.tusi_type || 'UMUM';
+          adminFlag = String(profile.role).toUpperCase() === 'SUPER_ADMIN';
+          
+          setUserTusiType(currentTusi);
+          setIsSuperAdmin(adminFlag);
+          setSelectedTusi(adminFlag ? 'ALL' : currentTusi);
+        }
       }
-    }
 
-    await fetchTemplates();
-    setLoading(false);
+      await fetchTemplates();
+    } catch (err: any) {
+      console.error('Error load user/templates:', err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // FETCH TEMPLATES DENGAN QUERY AMAN (MENCEGAH ERROR POSTGREST FOREIGN KEY)
   const fetchTemplates = async () => {
-    const { data } = await supabase
-      .from('task_templates')
-      .select('*, unit:units(name, code)')
-      .order('created_at', { ascending: false });
-    if (data) setTemplates(data as TemplateItem[]);
+    try {
+      // 1. Coba query dengan join created_by_unit
+      const { data, error } = await supabase
+        .from('task_templates')
+        .select('*, unit:created_by_unit(name, code)')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('Fallback ke select(*) murni karena foreign key alias:', error.message);
+        // Fallback langsung ambil data mentah tanpa join
+        const { data: fallbackData, error: fbError } = await supabase
+          .from('task_templates')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (fbError) throw fbError;
+        if (fallbackData) setTemplates(fallbackData as TemplateItem[]);
+      } else if (data) {
+        setTemplates(data as TemplateItem[]);
+      }
+    } catch (err: any) {
+      console.error('Fatal fetchTemplates error:', err.message);
+      setErrorMsg(`Gagal memuat katalog tusi: ${err.message}`);
+    }
   };
 
   const canManageTemplate = (template: TemplateItem) => {
@@ -173,14 +200,15 @@ export default function TusiCatalogPage() {
     } else {
       setIsEditModalOpen(false);
       setSuccessMsg('Master Tusi berhasil diperbarui!');
-      fetchTemplates();
+      await fetchTemplates();
+      router.refresh();
       setTimeout(() => setSuccessMsg(''), 3500);
     }
   };
 
   const handleDeleteTemplate = async (templateId: string, title: string) => {
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini tidak akan menghapus tugas yang sudah terlanjur berjalan pada periode aktif.`
+      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini akan menghapus template ini dari Bank Tusi dan dari pilihan rekam tugas baru.`
     );
     if (!confirmed) return;
 
@@ -193,7 +221,8 @@ export default function TusiCatalogPage() {
       alert(`Gagal menghapus template: ${error.message}`);
     } else {
       setSuccessMsg(`Master Tusi "${title}" berhasil dihapus.`);
-      fetchTemplates();
+      await fetchTemplates();
+      router.refresh();
       setTimeout(() => setSuccessMsg(''), 3500);
     }
   };
@@ -210,7 +239,6 @@ export default function TusiCatalogPage() {
       const seen = new Set<string>();
       const idsToDelete: string[] = [];
 
-      // Sort dari yang terlama dibuat
       const sortedTemplates = [...templates].sort((a, b) => 
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
@@ -232,12 +260,11 @@ export default function TusiCatalogPage() {
           .delete()
           .in('id', idsToDelete);
 
-        if (error) {
-          throw new Error(error.message);
-        }
+        if (error) throw error;
 
         setSuccessMsg(`Berhasil membersihkan ${idsToDelete.length} master tusi duplikat.`);
         await fetchTemplates();
+        router.refresh();
       }
     } catch (err: any) {
       setErrorMsg(`Gagal membersihkan duplikat: ${err.message}`);
@@ -475,10 +502,10 @@ export default function TusiCatalogPage() {
           <div className="col-span-full bg-white border border-stone-200/60 rounded-3xl p-12 text-center space-y-2 shadow-sm">
             <ShieldAlert className="w-8 h-8 text-stone-300 mx-auto" />
             <p className="text-xs font-semibold text-stone-700">
-              Belum ada master tusi untuk kategori {userTusiType}
+              Belum ada master tusi untuk kategori {selectedTusi === 'ALL' ? userTusiType : selectedTusi}
             </p>
             <p className="text-[11px] text-stone-400">
-              Tugas yang Anda rekam dengan opsi "Simpan ke Katalog Tusi" akan otomatis muncul di sini untuk dikloning oleh seksi Anda.
+              Klik tombol "+ Tambah Master Tusi" di kanan atas untuk menambahkan standar pekerjaan baru.
             </p>
           </div>
         ) : (
@@ -500,7 +527,6 @@ export default function TusiCatalogPage() {
                       <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-full">
                         {t.period_type}
                       </span>
-                      {/* Label Sifat Klerikal vs Non-Klerikal */}
                       {isClerical ? (
                         <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <RotateCw className="w-2.5 h-2.5" /> Auto-Cycle
@@ -578,7 +604,7 @@ export default function TusiCatalogPage() {
           <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
               <div className="flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-primary" />
+                <BookOpen className="w-5 h-5 text-[#DF3B68]" />
                 <h3 className="font-bold text-stone-900 text-sm md:text-base">
                   Edit Master Tusi
                 </h3>
@@ -613,7 +639,7 @@ export default function TusiCatalogPage() {
                     type="text"
                     value={editTusiType}
                     onChange={(e) => setEditTusiType(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 uppercase focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 uppercase focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                     required
                   />
                 </div>
@@ -623,7 +649,7 @@ export default function TusiCatalogPage() {
                   <select
                     value={editPeriodType}
                     onChange={(e) => setEditPeriodType(e.target.value as PeriodType)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                   >
                     <option value="BULANAN">Bulanan</option>
                     <option value="TRIWULANAN">Triwulanan</option>
@@ -634,7 +660,6 @@ export default function TusiCatalogPage() {
                 </div>
               </div>
 
-              {/* Toggle Sifat Klerikal / Otomasi */}
               {editPeriodType !== 'INSIDENTIL' && (
                 <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
                   <div>
@@ -717,7 +742,7 @@ export default function TusiCatalogPage() {
                   type="text"
                   value={editLegalBasis}
                   onChange={(e) => setEditLegalBasis(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
 
@@ -727,7 +752,7 @@ export default function TusiCatalogPage() {
                   rows={3}
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-full p-3 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
 
@@ -742,7 +767,7 @@ export default function TusiCatalogPage() {
                 <Button
                   type="submit"
                   isLoading={isSubmitting}
-                  className="bg-primary hover:bg-primary-hover text-white font-semibold"
+                  className="bg-[#DF3B68] hover:bg-[#C72F58] text-white font-semibold"
                 >
                   Simpan Perubahan
                 </Button>
