@@ -40,6 +40,7 @@ export default function EditTaskPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   const [title, setTitle] = useState('');
+  const [shortDescription, setShortDescription] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
   
@@ -77,10 +78,11 @@ export default function EditTaskPage() {
     }
 
     setTitle(task.title);
+    setShortDescription(task.short_description || '');
     setDescription(task.description || '');
     setCategory(task.category || 'TUSI');
     
-    // Load Multi-Regulasi (Fallback ke data lama)
+    // Load Multi-Regulasi
     if (task.regulations && Array.isArray(task.regulations) && task.regulations.length > 0) {
       setRegulations(task.regulations);
     } else if (task.legal_basis) {
@@ -174,6 +176,7 @@ export default function EditTaskPage() {
         .from('tasks')
         .update({
           title: title.trim(),
+          short_description: shortDescription.trim() || null,
           description: description.trim() || null,
           category,
           legal_basis: primaryLegalBasis,
@@ -239,7 +242,7 @@ export default function EditTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Edit Rincian Tugas</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Perbarui format deskripsi, multi-regulasi, link tools, masa kritis, dan PIC pelaksana.
+            Perbarui judul, deskripsi singkat manual, petunjuk teknis H1, multi-regulasi, dan PIC pelaksana.
           </p>
         </div>
       </div>
@@ -296,6 +299,24 @@ export default function EditTaskPage() {
               onChange={(e) => setTitle(e.target.value)}
               required
             />
+
+            {/* INPUT MANUAL: DESKRIPSI SINGKAT PEKERJAAN */}
+            <div className="space-y-1.5 text-left">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Deskripsi Singkat Pekerjaan (Gambaran Sekilas untuk Tampilan Daftar)</span>
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Contoh: Rekapitulasi atas Laporan Penertiban Ketidaksesuaian BMN atas Wasdal BMN Smt I 2026..."
+                value={shortDescription}
+                onChange={(e) => setShortDescription(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 leading-relaxed resize-none"
+              />
+              <p className="text-[11px] text-stone-400">
+                Teks ini yang akan langsung ditampilkan tepat di bawah judul tugas pada halaman daftar pekerjaan.
+              </p>
+            </div>
 
             {/* Input Multi-Dasar Hukum */}
             <div className="p-4 bg-stone-50/70 rounded-2xl border border-stone-200 space-y-3">
@@ -412,7 +433,7 @@ export default function EditTaskPage() {
             <div className="space-y-1.5 text-left">
               <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
-                <span>Deskripsi / Petunjuk Teknis (Editor Dokumen)</span>
+                <span>Petunjuk Teknis Lengkap & Detail (Gunakan Tombol H1 untuk membuat Bab)</span>
               </label>
               <RichTextEditor
                 value={description}
