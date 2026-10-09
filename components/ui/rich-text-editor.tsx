@@ -47,7 +47,7 @@ export function RichTextEditor({
   };
 
   const insertHeadingTemplate = () => {
-    const template = `<h1>JUDUL SEKSI BARU</h1><p>Tuliskan rincian uraian atau petunjuk teknis untuk seksi ini di sini...</p>`;
+    const template = `<h1>JUDUL SEKSI BARU</h1><p>Tuliskan petunjuk teknis atau uraian untuk bagian ini...</p>`;
     document.execCommand('insertHTML', false, template);
     if (editorRef.current) {
       onChange(editorRef.current.innerHTML);
@@ -58,11 +58,10 @@ export function RichTextEditor({
     <div className="border border-stone-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 transition-colors focus-within:ring-2 focus-within:ring-[#DF3B68]/20 focus-within:border-[#DF3B68]">
       {/* Toolbar Format */}
       <div className="flex flex-wrap items-center gap-1 p-2 bg-stone-50 dark:bg-slate-800/80 border-b border-stone-200 dark:border-slate-700">
-        {/* Headings ala Notion / Google Docs */}
         <button
           type="button"
           onClick={() => executeCmd('formatBlock', '<h1>')}
-          title="Judul Utama (H1 - Section Notion)"
+          title="Judul Bab (H1 - Section Notion)"
           className="px-2 py-1.5 rounded-lg text-xs font-bold text-stone-800 dark:text-slate-200 hover:bg-stone-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-1"
         >
           <Heading1 className="w-4 h-4 text-[#DF3B68]" />
@@ -139,7 +138,7 @@ export function RichTextEditor({
         <button
           type="button"
           onClick={insertHeadingTemplate}
-          title="Sisipkan Template Seksi Baru"
+          title="Sisipkan Format Judul Bab Baru"
           className="px-2.5 py-1 text-xs font-semibold text-[#DF3B68] bg-[#DF3B68]/10 hover:bg-[#DF3B68]/20 rounded-lg flex items-center gap-1 transition-colors"
         >
           <FolderPlus className="w-3.5 h-3.5" />
