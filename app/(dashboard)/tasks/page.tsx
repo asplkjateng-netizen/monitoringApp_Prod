@@ -52,6 +52,7 @@ interface TaskItem {
   id: string;
   unit_id: string;
   title: string;
+  short_description?: string | null;
   description?: string;
   category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   legal_basis?: string;
@@ -87,16 +88,6 @@ interface DocSection {
   id: string;
   title: string;
   content: string;
-}
-
-// Helper untuk mengambil teks ringkas deskripsi (bersih dari tag HTML & simbol format)
-function getSnippetDescription(raw?: string): string {
-  if (!raw) return '';
-  return raw
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/[-=_]{3,}/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 // -------------------------------------------------------------
@@ -520,6 +511,7 @@ function TasksContent() {
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
       t.title?.toLowerCase().includes(search.toLowerCase()) ||
+      (t.short_description && t.short_description.toLowerCase().includes(search.toLowerCase())) ||
       (t.unit?.name && t.unit.name.toLowerCase().includes(search.toLowerCase()));
       
     if (!matchesSearch) return false;
@@ -661,7 +653,7 @@ function TasksContent() {
             <Search className="w-4 h-4 text-stone-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Cari uraian tugas / unit kerja..."
+              placeholder="Cari uraian tugas / deskripsi singkat / unit kerja..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/70 dark:bg-slate-800/80 rounded-xl border border-stone-200 dark:border-slate-700 text-stone-900 dark:text-slate-100 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
@@ -775,8 +767,6 @@ function TasksContent() {
                   year: 'numeric' 
                 });
 
-                const snippet = getSnippetDescription(task.description);
-
                 return (
                   <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
                     <div className="p-5 flex items-center justify-between gap-4">
@@ -811,10 +801,10 @@ function TasksContent() {
                           {task.title}
                         </h3>
 
-                        {/* DESKRIPSI RINGKAS (SNIPPET GAMBARAN SEKILAS TUGAS) */}
-                        {snippet && (
-                          <p className="text-xs text-stone-500 dark:text-slate-400 line-clamp-2 leading-relaxed pt-0.5">
-                            {snippet}
+                        {/* DESKRIPSI SINGKAT MANUAL DARI INPUT FORMULIR */}
+                        {task.short_description && (
+                          <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed pt-0.5 font-normal">
+                            {task.short_description}
                           </p>
                         )}
                         
@@ -1064,8 +1054,6 @@ function TasksContent() {
                   year: 'numeric' 
                 });
 
-                const snippet = getSnippetDescription(task.description);
-
                 return (
                   <div key={task.id} className="p-4 space-y-3.5 transition-colors">
                     {/* BARIS LENCANA STATUS MOBILE DENGAN TANGGAL DEADLINE MERAH BATA */}
@@ -1090,9 +1078,10 @@ function TasksContent() {
                         {task.title}
                       </h3>
 
-                      {snippet && (
-                        <p className="text-xs text-stone-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                          {snippet}
+                      {/* DESKRIPSI SINGKAT MANUAL DARI INPUT FORMULIR */}
+                      {task.short_description && (
+                        <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed font-normal">
+                          {task.short_description}
                         </p>
                       )}
                       
@@ -1160,7 +1149,7 @@ function TasksContent() {
                               : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-300 border-stone-200 dark:border-slate-700'
                           }`}
                         >
-                          <BookOpen className="w-3 h-3 text-amber-600" />
+                          <BookOpen className="w-3.5 h-3.5 text-amber-600" />
                           <span>Dasar Hukum</span>
                           {isDescExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                         </button>
