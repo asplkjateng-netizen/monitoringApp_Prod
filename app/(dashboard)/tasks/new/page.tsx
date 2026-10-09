@@ -23,11 +23,19 @@ import {
   Link as LinkIcon, 
   Tag, 
   BellRing,
-  RotateCw
+  RotateCw,
+  Wrench,
+  BookOpen
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
+
+interface LinkItem {
+  name: string;
+  url: string;
+}
 
 interface StaffProfile {
   id: string;
@@ -50,6 +58,8 @@ interface TaskTemplate {
   description: string | null;
   legal_basis: string | null;
   legal_basis_link?: string | null;
+  regulations?: LinkItem[] | null;
+  tools?: LinkItem[] | null;
   period_type: 'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL';
   deadline_rule?: string;
   exact_day?: number;
@@ -88,8 +98,11 @@ export default function NewTaskPage() {
   const [isClericalRecurring, setIsClericalRecurring] = useState<boolean>(true);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [legalBasis, setLegalBasis] = useState('');
-  const [legalBasisLink, setLegalBasisLink] = useState('');
+
+  // Multi-Link Regulasi & Tools
+  const [regulations, setRegulations] = useState<LinkItem[]>([{ name: '', url: '' }]);
+  const [tools, setTools] = useState<LinkItem[]>([]);
+
   const [periodType, setPeriodType] = useState<'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL'>('TRIWULANAN');
   
   // State Pemilih Periode Spesifik
@@ -245,8 +258,7 @@ export default function NewTaskPage() {
       setUserTusiType(cleanTusi);
 
       const roleUpper = String(profile?.role || 'STAF').toUpperCase();
-      const adminStatus = roleUpper === 'SUPER_ADMIN';
-      setIsSuperAdmin(adminStatus);
+      setIsSuperAdmin(roleUpper === 'SUPER_ADMIN');
 
       let loadedStaff: StaffProfile[] = [];
       if (targetUnitId) {
@@ -273,16 +285,13 @@ export default function NewTaskPage() {
       setStaffList(loadedStaff);
       setSelectedPics([user.id]);
 
-      // Scoping query template ke tusi seksi unit aktif
       let tplQuery = supabase.from('task_templates').select('*').order('title', { ascending: true });
       if (cleanTusi && cleanTusi !== 'UMUM') {
         tplQuery = tplQuery.ilike('tusi_type', cleanTusi);
       }
 
       const { data: tpl, error: tplError } = await tplQuery;
-      if (tplError) {
-        console.error('Gagal mengambil task templates:', tplError.message);
-      } else if (tpl) {
+      if (!tplError && tpl) {
         setTemplates(tpl as TaskTemplate[]);
       }
     } catch (err: any) {
@@ -292,7 +301,6 @@ export default function NewTaskPage() {
     }
   };
 
-  // Deduplikasi tampilan Master Tusi di dropdown
   const deduplicatedTemplates = useMemo(() => {
     const map = new Map<string, TaskTemplate>();
     for (const t of templates) {
@@ -360,8 +368,23 @@ export default function NewTaskPage() {
       setTitle(tpl.title);
       if (tpl.category) setCategory(tpl.category);
       setDescription(tpl.description || '');
-      setLegalBasis(tpl.legal_basis || '');
-      setLegalBasisLink(tpl.legal_basis_link || '');
+
+      // Load regulations
+      if (tpl.regulations && Array.isArray(tpl.regulations) && tpl.regulations.length > 0) {
+        setRegulations(tpl.regulations);
+      } else if (tpl.legal_basis) {
+        setRegulations([{ name: tpl.legal_basis, url: tpl.legal_basis_link || '' }]);
+      } else {
+        setRegulations([{ name: '', url: '' }]);
+      }
+
+      // Load tools
+      if (tpl.tools && Array.isArray(tpl.tools) && tpl.tools.length > 0) {
+        setTools(tpl.tools);
+      } else {
+        setTools([]);
+      }
+
       setPeriodType(tpl.period_type);
       setIsClericalRecurring(tpl.is_recurring ?? (tpl.period_type !== 'INSIDENTIL'));
       if (tpl.critical_days_threshold) setCriticalDaysThreshold(tpl.critical_days_threshold);
@@ -371,6 +394,28 @@ export default function NewTaskPage() {
         setCustomDayInput(String(tpl.exact_day));
       }
     }
+  };
+
+  // Handler Multi-Regulasi
+  const handleAddRegulation = () => setRegulations((prev) => [...prev, { name: '', url: '' }]);
+  const handleRemoveRegulation = (idx: number) => setRegulations((prev) => prev.filter((_, i) => i !== idx));
+  const handleRegulationChange = (idx: number, field: 'name' | 'url', val: string) => {
+    setRegulations((prev) => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], [field]: val };
+      return copy;
+    });
+  };
+
+  // Handler Tools
+  const handleAddTool = () => setTools((prev) => [...prev, { name: '', url: '' }]);
+  const handleRemoveTool = (idx: number) => setTools((prev) => prev.filter((_, i) => i !== idx));
+  const handleToolChange = (idx: number, field: 'name' | 'url', val: string) => {
+    setTools((prev) => {
+      const copy = [...prev];
+      copy[idx] = { ...copy[idx], [field]: val };
+      return copy;
+    });
   };
 
   const togglePic = (picId: string) => {
@@ -462,6 +507,12 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
+      // Sanitasi filter data regulasi & tools
+      const validRegulations = regulations.filter((r) => r.name.trim() || r.url.trim());
+      const validTools = tools.filter((t) => t.name.trim() || t.url.trim());
+      const primaryLegalBasis = validRegulations.length > 0 ? validRegulations[0].name : null;
+      const primaryLegalBasisLink = validRegulations.length > 0 ? validRegulations[0].url : null;
+
       // 1. Simpan Master Tusi jika opsi dipilih dan belum ada
       if (saveAsTemplate && !createdTemplateId) {
         const { data: existingTpl } = await supabase
@@ -481,8 +532,10 @@ export default function NewTaskPage() {
               title: title.trim(),
               category,
               description: description.trim() || null,
-              legal_basis: legalBasis.trim() || null,
-              legal_basis_link: legalBasisLink.trim() || null,
+              legal_basis: primaryLegalBasis,
+              legal_basis_link: primaryLegalBasisLink,
+              regulations: validRegulations,
+              tools: validTools,
               period_type: periodType,
               deadline_rule: deadlineMode === 'CUSTOM' || periodType === 'INSIDENTIL' ? 'MANUAL' : deadlineRule,
               exact_day: exactDay,
@@ -506,8 +559,10 @@ export default function NewTaskPage() {
           title: title.trim(),
           category,
           description: description.trim() || null,
-          legal_basis: legalBasis.trim() || null,
-          legal_basis_link: legalBasisLink.trim() || null,
+          legal_basis: primaryLegalBasis,
+          legal_basis_link: primaryLegalBasisLink,
+          regulations: validRegulations,
+          tools: validTools,
           period_type: periodType,
           period_month: getPeriodMonthValue(),
           period_year: selectedYear,
@@ -593,7 +648,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas tusi, tugas tambahan, improvisasi inovatif, atau penugasan massal satker.
+            Daftarkan tugas tusi, tugas tambahan, formulir terformat, multi-regulasi, dan tautan alat kerja.
           </p>
         </div>
       </div>
@@ -606,7 +661,7 @@ export default function NewTaskPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Template Selector Scoped ke Tusi Seksi Pengguna */}
+        {/* Template Selector */}
         <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
@@ -632,7 +687,7 @@ export default function NewTaskPage() {
           </select>
         </div>
 
-        {/* Rincian Tugas Pokok */}
+        {/* Rincian Informasi Tugas */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
@@ -701,50 +756,135 @@ export default function NewTaskPage() {
               required
             />
 
-            {/* Input Dasar Hukum & Tautan Regulasi */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1 text-left">
-                <label className="block text-xs font-semibold text-stone-600">Dasar Hukum / Nomor Regulasi</label>
-                <input
-                  type="text"
-                  placeholder="Contoh: PER-5/PB/2024, ND Dit. APK"
-                  value={legalBasis}
-                  onChange={(e) => setLegalBasis(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
-                />
+            {/* FITUR MULTI-DASAR HUKUM */}
+            <div className="p-4 bg-stone-50/70 rounded-2xl border border-stone-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                  <BookOpen className="w-4 h-4 text-[#DF3B68]" />
+                  <span>Dasar Hukum & Tautan Regulasi (Bisa lebih dari satu)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAddRegulation}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#DF3B68] hover:text-[#C72F58]"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah Dasar Hukum
+                </button>
               </div>
 
-              <div className="space-y-1 text-left">
-                <label className="block text-xs font-semibold text-stone-600">Tautan Link Regulasi (JDIH / Cloud)</label>
-                <div className="relative">
-                  <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="url"
-                    placeholder="https://jdih.kemenkeu.go.id/..."
-                    value={legalBasisLink}
-                    onChange={(e) => setLegalBasisLink(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 font-mono"
-                  />
-                </div>
+              <div className="space-y-2">
+                {regulations.map((reg, idx) => (
+                  <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nomor Regulasi (contoh: PER-28/PB/2019)"
+                      value={reg.name}
+                      onChange={(e) => handleRegulationChange(idx, 'name', e.target.value)}
+                      className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                    />
+                    <div className="flex items-center gap-1.5 w-full sm:w-1/2">
+                      <div className="relative flex-1">
+                        <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="url"
+                          placeholder="https://jdih.kemenkeu.go.id/..."
+                          value={reg.url}
+                          onChange={(e) => handleRegulationChange(idx, 'url', e.target.value)}
+                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                        />
+                      </div>
+                      {regulations.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRegulation(idx)}
+                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                          title="Hapus regulasi"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div className="space-y-1 text-left">
-              <label className="block text-xs font-semibold text-stone-600">Deskripsi / Petunjuk Teknis</label>
-              <textarea
-                rows={3}
-                placeholder="Rincian prosedur teknis pelaksanaan..."
+            {/* FITUR TOOLS & DOKUMEN / APLIKASI KERJA */}
+            <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                    <Wrench className="w-4 h-4 text-emerald-600" />
+                    <span>Tools & Alat Kerja / Dokumen Pendukung (Label: Tools)</span>
+                  </label>
+                  <p className="text-[11px] text-emerald-700/80 mt-0.5">
+                    Tautkan aplikasi kedinasan atau spreadsheet kerja (misal: E-Rekon&LK, Sakti, Kertas Kerja BLU).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddTool}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-white px-2.5 py-1 rounded-lg border border-emerald-200 shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah Tools
+                </button>
+              </div>
+
+              {tools.length === 0 ? (
+                <p className="text-xs text-stone-400 italic">Belum ada tools ditambahkan. Klik tombol di atas jika diperlukan.</p>
+              ) : (
+                <div className="space-y-2">
+                  {tools.map((tool, idx) => (
+                    <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nama Alat / Aplikasi (contoh: Aplikasi E-Rekon&LK)"
+                        value={tool.name}
+                        onChange={(e) => handleToolChange(idx, 'name', e.target.value)}
+                        className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-semibold"
+                      />
+                      <div className="flex items-center gap-1.5 w-full sm:w-1/2">
+                        <div className="relative flex-1">
+                          <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="url"
+                            placeholder="https://erekon-lk.kemenkeu.go.id/..."
+                            value={tool.url}
+                            onChange={(e) => handleToolChange(idx, 'url', e.target.value)}
+                            className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTool(idx)}
+                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                          title="Hapus tools"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* RICH TEXT EDITOR ALA MS WORD */}
+            <div className="space-y-1.5 text-left">
+              <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Petunjuk Teknis & Deskripsi Tugas (Editor Dokumen)</span>
+              </label>
+              <RichTextEditor
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 resize-none"
+                onChange={setDescription}
+                placeholder="Tuliskan petunjuk teknis, formula IKU, ruang lingkup, dan waktu pelaksanaan secara rapi..."
               />
             </div>
           </div>
 
           {/* SIKLUS, SIFAT PEKERJAAN & TENGGAT */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
-            
-            {/* Sakelar Sifat Pekerjaan Klerikal */}
             <div className="p-3.5 bg-white rounded-xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
@@ -752,7 +892,7 @@ export default function NewTaskPage() {
                   <span>Sifat Tugas & Otomasi Periode (Klerikal vs Non-Klerikal)</span>
                 </div>
                 <p className="text-[11px] text-stone-500 mt-0.5">
-                  Tugas klerikal rutin akan digenerate otomatis oleh cron setiap awal siklus. Tugas non-klerikal tidak akan digenerate otomatis.
+                  Tugas klerikal rutin akan digenerate otomatis oleh cron setiap awal siklus.
                 </p>
               </div>
 
@@ -897,7 +1037,7 @@ export default function NewTaskPage() {
                         deadlineMode === 'CUSTOM' ? 'bg-[#DF3B68] text-white shadow-xs' : 'text-stone-600 hover:text-[#DF3B68]'
                       }`}
                     >
-                      Kustom Bebas (Misal: Smt 1 di Oktober)
+                      Kustom Bebas
                     </button>
                   </div>
                 </div>
@@ -962,7 +1102,7 @@ export default function NewTaskPage() {
                 ) : (
                   <div className="p-3 bg-white rounded-xl border border-stone-200 space-y-2">
                     <label className="block text-xs font-semibold text-stone-700">
-                      Tentukan Tanggal Jatuh Tempo Bebas (Tanpa Terkunci Rumus Siklus):
+                      Tentukan Tanggal Jatuh Tempo Bebas:
                     </label>
                     <input
                       type="date"
@@ -971,9 +1111,6 @@ export default function NewTaskPage() {
                       required
                       className="w-full sm:w-64 px-3 py-2 rounded-xl border border-stone-200 bg-stone-50 text-xs font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
                     />
-                    <p className="text-[11px] text-stone-400">
-                      Contoh: Tugas Semester 1 yang baru jatuh tempo di bulan Oktober dapat langsung ditentukan tanggalnya di sini.
-                    </p>
                   </div>
                 )}
 
@@ -992,10 +1129,6 @@ export default function NewTaskPage() {
                 <BellRing className="w-4 h-4 text-[#DF3B68]" />
                 <span>Peringatan Masa Kritis & WhatsApp (H-X) *</span>
               </label>
-              <p className="text-[11px] text-stone-500">
-                Pesan WA & lencana kritis akan aktif mulai H- berapa sebelum deadline:
-              </p>
-              
               <div className="flex items-center gap-2 pt-1">
                 {[1, 3, 7, 14].map((days) => (
                   <button
@@ -1029,7 +1162,6 @@ export default function NewTaskPage() {
 
             <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
               <label className="block text-xs font-bold text-stone-800">Tingkat Prioritas Tugas</label>
-              <p className="text-[11px] text-stone-500">Klasifikasikan tingkat urgensi penyelesaian pekerjaan:</p>
               <div className="flex gap-2 pt-1">
                 {[
                   { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-200 peer-checked:text-stone-800' },
@@ -1255,7 +1387,6 @@ export default function NewTaskPage() {
                   </div>
                 )}
               </div>
-
             </div>
           )}
         </div>
@@ -1268,9 +1399,6 @@ export default function NewTaskPage() {
                 <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
                 <span>Tahapan Sub-Pekerjaan Awal & Batas Waktu (Opsional)</span>
               </div>
-              <p className="text-[11px] text-stone-500 mt-0.5">
-                Batas waktu sub-tugas opsional dan tidak boleh melampaui tenggat tugas utama ({deadline || 'belum ditentukan'}).
-              </p>
             </div>
             <button
               type="button"
