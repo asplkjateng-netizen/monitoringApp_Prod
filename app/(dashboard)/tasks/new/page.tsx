@@ -70,6 +70,7 @@ interface TaskTemplate {
 interface SubtaskDraft {
   title: string;
   deadline?: string;
+  pic_id?: string;
 }
 
 export default function NewTaskPage() {
@@ -132,7 +133,7 @@ export default function NewTaskPage() {
 
   // Multi-PIC Manual & Subtasks
   const [selectedPics, setSelectedPics] = useState<string[]>([]);
-  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([{ title: '', deadline: '' }]);
+  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([{ title: '', deadline: '', pic_id: '' }]);
 
   useEffect(() => {
     fetchInitialData();
@@ -369,7 +370,6 @@ export default function NewTaskPage() {
       if (tpl.category) setCategory(tpl.category);
       setDescription(tpl.description || '');
 
-      // Load regulations
       if (tpl.regulations && Array.isArray(tpl.regulations) && tpl.regulations.length > 0) {
         setRegulations(tpl.regulations);
       } else if (tpl.legal_basis) {
@@ -378,7 +378,6 @@ export default function NewTaskPage() {
         setRegulations([{ name: '', url: '' }]);
       }
 
-      // Load tools
       if (tpl.tools && Array.isArray(tpl.tools) && tpl.tools.length > 0) {
         setTools(tpl.tools);
       } else {
@@ -396,7 +395,6 @@ export default function NewTaskPage() {
     }
   };
 
-  // Handler Multi-Regulasi
   const handleAddRegulation = () => setRegulations((prev) => [...prev, { name: '', url: '' }]);
   const handleRemoveRegulation = (idx: number) => setRegulations((prev) => prev.filter((_, i) => i !== idx));
   const handleRegulationChange = (idx: number, field: 'name' | 'url', val: string) => {
@@ -407,7 +405,6 @@ export default function NewTaskPage() {
     });
   };
 
-  // Handler Tools
   const handleAddTool = () => setTools((prev) => [...prev, { name: '', url: '' }]);
   const handleRemoveTool = (idx: number) => setTools((prev) => prev.filter((_, i) => i !== idx));
   const handleToolChange = (idx: number, field: 'name' | 'url', val: string) => {
@@ -430,7 +427,8 @@ export default function NewTaskPage() {
     );
   };
 
-  const handleAddSubtask = () => setSubtasks((prev) => [...prev, { title: '', deadline: '' }]);
+  // HANDLER SUB-TUGAS & PIC OPSIONAL
+  const handleAddSubtask = () => setSubtasks((prev) => [...prev, { title: '', deadline: '', pic_id: '' }]);
   const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
   const handleSubtaskTitleChange = (index: number, val: string) => {
     setSubtasks((prev) => {
@@ -447,6 +445,13 @@ export default function NewTaskPage() {
     setSubtasks((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], deadline: val };
+      return updated;
+    });
+  };
+  const handleSubtaskPicChange = (index: number, picId: string) => {
+    setSubtasks((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], pic_id: picId };
       return updated;
     });
   };
@@ -507,13 +512,12 @@ export default function NewTaskPage() {
     try {
       let createdTemplateId = selectedTemplateId || null;
 
-      // Sanitasi filter data regulasi & tools
       const validRegulations = regulations.filter((r) => r.name.trim() || r.url.trim());
       const validTools = tools.filter((t) => t.name.trim() || t.url.trim());
       const primaryLegalBasis = validRegulations.length > 0 ? validRegulations[0].name : null;
       const primaryLegalBasisLink = validRegulations.length > 0 ? validRegulations[0].url : null;
 
-      // 1. Simpan Master Tusi jika opsi dipilih dan belum ada
+      // 1. Simpan Master Tusi jika opsi dipilih
       if (saveAsTemplate && !createdTemplateId) {
         const { data: existingTpl } = await supabase
           .from('task_templates')
@@ -582,7 +586,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan PIC Pelaksana & Notifikasi In-App
+      // 3. Simpan PIC Pelaksana Tugas Utama & Notifikasi
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -600,17 +604,29 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks
+      // 4. Simpan Subtasks & Subtask PICs (Opsional)
       const validSubtasks = subtasks.filter((s) => s.title.trim().length > 0);
       if (validSubtasks.length > 0) {
-        const subtaskPayloads = validSubtasks.map((st) => ({
-          task_id: taskId,
-          title: st.title.trim(),
-          deadline: st.deadline || null,
-          is_completed: false,
-          evidence_link_type: 'INHERIT',
-        }));
-        await supabase.from('subtasks').insert(subtaskPayloads);
+        for (const st of validSubtasks) {
+          const { data: createdSubtask } = await supabase
+            .from('subtasks')
+            .insert({
+              task_id: taskId,
+              title: st.title.trim(),
+              deadline: st.deadline || null,
+              is_completed: false,
+              evidence_link_type: 'INHERIT',
+            })
+            .select('id')
+            .single();
+
+          if (createdSubtask && st.pic_id) {
+            await supabase.from('subtask_pics').insert({
+              subtask_id: createdSubtask.id,
+              user_id: st.pic_id,
+            });
+          }
+        }
       }
 
       router.push('/tasks');
@@ -648,7 +664,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas tusi, tugas tambahan, formulir terformat, multi-regulasi, dan tautan alat kerja.
+            Daftarkan tugas tusi, petunjuk berstruktur daftar isi, multi-regulasi, tools, dan PIC tahapan.
           </p>
         </div>
       </div>
@@ -750,18 +766,18 @@ export default function NewTaskPage() {
 
             <Input
               label="Judul / Uraian Tugas *"
-              placeholder="Contoh: Rekonsiliasi Laporan Keuangan UAKPA"
+              placeholder="Contoh: Telaah LK-BLU Tahap IV"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
             />
 
-            {/* FITUR MULTI-DASAR HUKUM */}
+            {/* MULTI-DASAR HUKUM */}
             <div className="p-4 bg-stone-50/70 rounded-2xl border border-stone-200 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
                   <BookOpen className="w-4 h-4 text-[#DF3B68]" />
-                  <span>Dasar Hukum & Tautan Regulasi (Bisa lebih dari satu)</span>
+                  <span>Dasar Hukum & Tautan Regulasi (Bisa Lebih Dari Satu)</span>
                 </label>
                 <button
                   type="button"
@@ -809,13 +825,13 @@ export default function NewTaskPage() {
               </div>
             </div>
 
-            {/* FITUR TOOLS & DOKUMEN / APLIKASI KERJA */}
+            {/* MULTI-TOOLS & APLIKASI KERJA */}
             <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
                     <Wrench className="w-4 h-4 text-emerald-600" />
-                    <span>Tools & Alat Kerja / Dokumen Pendukung (Label: Tools)</span>
+                    <span>Tools & Alat Kerja / Kertas Kerja (Label: Tools)</span>
                   </label>
                   <p className="text-[11px] text-emerald-700/80 mt-0.5">
                     Tautkan aplikasi kedinasan atau spreadsheet kerja (misal: E-Rekon&LK, Sakti, Kertas Kerja BLU).
@@ -869,11 +885,11 @@ export default function NewTaskPage() {
               )}
             </div>
 
-            {/* RICH TEXT EDITOR ALA MS WORD */}
+            {/* EDITOR DESKRIPSI H1 & DAFTAR ISI */}
             <div className="space-y-1.5 text-left">
               <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
-                <span>Petunjuk Teknis & Deskripsi Tugas (Editor Dokumen)</span>
+                <span>Petunjuk Teknis & Deskripsi Tugas (Gunakan Tombol H1 / + Seksi Bab untuk membuat Daftar Isi)</span>
               </label>
               <RichTextEditor
                 value={description}
@@ -883,7 +899,7 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* SIKLUS, SIFAT PEKERJAAN & TENGGAT */}
+          {/* SIKLUS & TENGGAT */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
             <div className="p-3.5 bg-white rounded-xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -1187,12 +1203,12 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        {/* PIC PELAKSANA */}
+        {/* PIC PELAKSANA UTAMA */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
             <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
               <Users className="w-4 h-4 text-[#DF3B68]" />
-              <span>Tetapkan PIC Pelaksana</span>
+              <span>Tetapkan PIC Pelaksana Utama</span>
             </div>
 
             <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
@@ -1391,14 +1407,17 @@ export default function NewTaskPage() {
           )}
         </div>
 
-        {/* SUBTASKS */}
+        {/* SUBTASKS DENGAN FITUR PEMILIHAN PIC OPSIONAL */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
               <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
-                <span>Tahapan Sub-Pekerjaan Awal & Batas Waktu (Opsional)</span>
+                <span>Tahapan Sub-Pekerjaan & PIC Pelaksana (Opsional)</span>
               </div>
+              <p className="text-[11px] text-stone-400 mt-0.5">
+                Pilih PIC untuk tiap tahapan jika tugas dibagi per pegawai. Jika tidak dipilih, dapat ditentukan nanti.
+              </p>
             </div>
             <button
               type="button"
@@ -1420,6 +1439,23 @@ export default function NewTaskPage() {
                   onChange={(e) => handleSubtaskTitleChange(idx, e.target.value)}
                   className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
+
+                {/* DROPDOWN PEMILIH PIC TAHAPAN (OPSIONAL) */}
+                <div className="relative">
+                  <select
+                    value={st.pic_id || ''}
+                    onChange={(e) => handleSubtaskPicChange(idx, e.target.value)}
+                    className="w-full sm:w-44 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  >
+                    <option value="">-- Tanpa PIC (Kosong) --</option>
+                    {staffList.map((staff) => (
+                      <option key={staff.id} value={staff.id}>
+                        {staff.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] text-stone-500 whitespace-nowrap">Batas:</span>
                   <input
