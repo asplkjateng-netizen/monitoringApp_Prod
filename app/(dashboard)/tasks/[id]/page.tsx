@@ -11,18 +11,25 @@ import {
   Plus, 
   Trash2, 
   ExternalLink, 
-  Link as LinkIcon,
-  ShieldAlert,
-  Save,
-  Loader2,
-  Edit3,
-  CalendarDays,
-  Info,
-  BookOpen,
-  Share2
+  Link as LinkIcon, 
+  ShieldAlert, 
+  Save, 
+  Loader2, 
+  Edit3, 
+  CalendarDays, 
+  Info, 
+  BookOpen, 
+  Share2,
+  Wrench,
+  FileText
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { TaskShareModal } from '@/components/tasks/task-share-modal';
+
+interface LinkItem {
+  name: string;
+  url: string;
+}
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -114,6 +121,25 @@ export default function TaskDetailPage() {
     if (pct >= 80) return 'bg-emerald-500';
     if (pct >= 31) return 'bg-amber-400';
     return 'bg-rose-500';
+  };
+
+  const getRegulationsList = (): LinkItem[] => {
+    if (!task) return [];
+    if (task.regulations && Array.isArray(task.regulations) && task.regulations.length > 0) {
+      return task.regulations.filter((r: LinkItem) => r.name || r.url);
+    }
+    if (task.legal_basis) {
+      return [{ name: task.legal_basis, url: task.legal_basis_link || '' }];
+    }
+    return [];
+  };
+
+  const getToolsList = (): LinkItem[] => {
+    if (!task) return [];
+    if (task.tools && Array.isArray(task.tools) && task.tools.length > 0) {
+      return task.tools.filter((t: LinkItem) => t.name || t.url);
+    }
+    return [];
   };
 
   const handleToggleSubtask = async (subtaskId: string, currentStatusVal: boolean) => {
@@ -352,9 +378,11 @@ export default function TaskDetailPage() {
     );
   }
 
+  const regList = getRegulationsList();
+  const toolsList = getToolsList();
+
   return (
     <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
-      
       {/* MODAL SHARING HUB */}
       {task && (
         <TaskShareModal
@@ -381,7 +409,6 @@ export default function TaskDetailPage() {
         </Link>
         
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Tombol Sharing Hub */}
           <button
             type="button"
             onClick={() => setIsShareModalOpen(true)}
@@ -470,31 +497,69 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
+        {/* Petunjuk Teknis & Deskripsi */}
         {task.description && (
-          <p className="text-xs md:text-sm text-stone-600 dark:text-slate-300 leading-relaxed bg-stone-50/70 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-100 dark:border-slate-800">
-            {task.description}
-          </p>
+          <div className="bg-stone-50/80 dark:bg-slate-800/60 p-4 rounded-2xl border border-stone-100 dark:border-slate-800 text-xs md:text-sm text-stone-700 dark:text-slate-200 leading-relaxed">
+            <p className="font-bold text-stone-900 dark:text-slate-100 mb-2 flex items-center gap-1.5 border-b border-stone-200/60 dark:border-slate-700/60 pb-1">
+              <FileText className="w-4 h-4 text-[#DF3B68]" />
+              Petunjuk Teknis & Deskripsi:
+            </p>
+            {task.description.includes('<') && task.description.includes('>') ? (
+              <div 
+                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
+                dangerouslySetInnerHTML={{ __html: task.description }}
+              />
+            ) : (
+              <div className="whitespace-pre-wrap leading-relaxed">
+                {task.description}
+              </div>
+            )}
+          </div>
         )}
 
-        {/* Dasar Hukum */}
-        {task.legal_basis && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600 dark:text-slate-300">
-            <span className="font-semibold text-stone-800 dark:text-slate-200">Dasar Hukum:</span>
-            <span className="bg-stone-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg font-mono text-stone-700 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
-              {task.legal_basis}
+        {/* Dasar Hukum (Multi-Regulasi) */}
+        {regList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
+            <span className="font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1">
+              <BookOpen className="w-3.5 h-3.5 text-blue-600" /> Dasar Hukum:
             </span>
-            {task.legal_basis_link && (
+            {regList.map((reg, idx) => (
+              <div key={idx} className="inline-flex items-center gap-1.5 bg-stone-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-stone-200 dark:border-slate-700 shadow-2xs">
+                <span className="font-mono text-stone-800 dark:text-slate-200 font-semibold">{reg.name}</span>
+                {reg.url && (
+                  <a
+                    href={reg.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-blue-600 dark:text-blue-400 hover:underline"
+                    title="Buka Tautan Regulasi"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Tools & Aplikasi Kerja */}
+        {toolsList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
+            <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
+              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools:
+            </span>
+            {toolsList.map((tool, idx) => (
               <a
-                href={task.legal_basis_link}
+                key={idx}
+                href={tool.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 px-3 py-1 rounded-lg border border-blue-200 dark:border-blue-800 transition-colors"
+                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 transition-colors font-medium shadow-2xs"
               >
-                <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Buka Dokumen Regulasi</span>
-                <ExternalLink className="w-3 h-3 text-blue-500" />
+                <span>{tool.name}</span>
+                <ExternalLink className="w-3 h-3 text-emerald-600" />
               </a>
-            )}
+            ))}
           </div>
         )}
 
@@ -526,7 +591,6 @@ export default function TaskDetailPage() {
 
       {/* Subtasks (Kiri) & Kontrol Cepat (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
         {/* Kolom Subtasks */}
         <div className="md:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-4 transition-colors">
           <div className="flex items-center justify-between border-b border-stone-100 dark:border-slate-800 pb-3">
@@ -682,7 +746,6 @@ export default function TaskDetailPage() {
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );
