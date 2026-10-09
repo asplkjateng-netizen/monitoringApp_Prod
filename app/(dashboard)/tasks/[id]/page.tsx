@@ -697,12 +697,12 @@ export default function TaskDetailPage() {
       )}
 
       {/* Header Rincian Tugas */}
-      <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-5 transition-colors">
+      <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm space-y-4 transition-colors">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            {/* LENCANA TENGGAT TEGAS */}
-            <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-3 py-1 rounded-full shadow-2xs">
-              <Calendar className="w-3.5 h-3.5 text-[#DF3B68]" />
+            {/* LENCANA TENGGAT MERAH BATA TEGAS */}
+            <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-[#DF3B68] text-white px-3 py-1 rounded-full shadow-2xs">
+              <Calendar className="w-3.5 h-3.5 text-white/90" />
               <span>Tenggat: {formattedDeadline}</span>
             </span>
 
@@ -726,10 +726,19 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100">{task.title}</h1>
+        <div className="space-y-1.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 leading-snug">
+            {task.title}
+          </h1>
+
+          {/* DESKRIPSI SINGKAT MANUAL DARI INPUT FORMULIR */}
+          {task.short_description && (
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-slate-300 leading-relaxed font-normal pt-0.5">
+              {task.short_description}
+            </p>
+          )}
           
-          <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-slate-400 pt-1">
+          <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-slate-400 pt-2">
             <CalendarDays className="w-4 h-4 text-[#DF3B68]" />
             <span className="font-semibold">Ubah Tenggat Waktu:</span>
             <input
@@ -741,7 +750,7 @@ export default function TaskDetailPage() {
           </div>
         </div>
 
-        {/* Petunjuk Teknis & Deskripsi dengan NOTION DOC VIEWER */}
+        {/* Petunjuk Teknis & Deskripsi dengan NOTION DOC VIEWER (HIDE & SHOW) */}
         {task.description && (
           <div className="pt-2">
             <NotionDocViewer rawContent={task.description} />
