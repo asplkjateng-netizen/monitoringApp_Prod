@@ -89,6 +89,16 @@ interface DocSection {
   content: string;
 }
 
+// Helper untuk mengambil teks ringkas deskripsi (bersih dari tag HTML & simbol format)
+function getSnippetDescription(raw?: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[-=_]{3,}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // -------------------------------------------------------------
 // KOMPONEN DAFTAR ISI INTERAKTIF RINGKAS (HIDE & SHOW ANTI-PANJANG)
 // -------------------------------------------------------------
@@ -688,19 +698,22 @@ function TasksContent() {
               { id: 'ON_PROGRESS', label: 'Proses' },
               { id: 'TERKENDALA', label: 'Terkendala' },
               { id: 'SELESAI', label: 'Selesai' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setStatusFilter(tab.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
-                  statusFilter === tab.id
-                    ? 'bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
-                    : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            ].map((tab) => {
+              const isActive = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                    isActive
+                      ? 'bg-[#DF3B68] text-white shadow-xs'
+                      : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap self-start sm:self-end lg:self-auto">
@@ -762,17 +775,19 @@ function TasksContent() {
                   year: 'numeric' 
                 });
 
+                const snippet = getSnippetDescription(task.description);
+
                 return (
                   <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
                     <div className="p-5 flex items-center justify-between gap-4">
-                      <div className="space-y-2 flex-1 min-w-0">
-                        {/* BARIS LENCANA STATUS DENGAN TANGGAL DEADLINE TEGAS */}
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        {/* BARIS LENCANA STATUS DENGAN WARNA MERAH BATA TEGAS */}
                         <div className="flex flex-wrap items-center gap-2">
                           {renderCategoryBadge(task.category)}
 
-                          {/* LENCANA TANGGAL DEADLINE UTAMA */}
-                          <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-0.5 rounded-full shadow-2xs">
-                            <Calendar className="w-3.5 h-3.5 text-[#DF3B68]" />
+                          {/* LENCANA TANGGAL DEADLINE (WARNA MERAH BATA DINAS) */}
+                          <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-[#DF3B68] text-white px-2.5 py-0.5 rounded-full shadow-2xs">
+                            <Calendar className="w-3.5 h-3.5 text-white/90" />
                             <span>Tenggat: {formattedDeadline}</span>
                           </span>
 
@@ -791,7 +806,17 @@ function TasksContent() {
                           </span>
                         </div>
 
-                        <h3 className="font-bold text-stone-900 dark:text-slate-100 text-base">{task.title}</h3>
+                        {/* JUDUL TUGAS */}
+                        <h3 className="font-bold text-stone-900 dark:text-slate-100 text-base leading-snug">
+                          {task.title}
+                        </h3>
+
+                        {/* DESKRIPSI RINGKAS (SNIPPET GAMBARAN SEKILAS TUGAS) */}
+                        {snippet && (
+                          <p className="text-xs text-stone-500 dark:text-slate-400 line-clamp-2 leading-relaxed pt-0.5">
+                            {snippet}
+                          </p>
+                        )}
                         
                         {task.kendala_note && task.status === 'TERKENDALA' && (
                           <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-xl border border-rose-100 dark:border-rose-900/50">
@@ -1039,15 +1064,17 @@ function TasksContent() {
                   year: 'numeric' 
                 });
 
+                const snippet = getSnippetDescription(task.description);
+
                 return (
                   <div key={task.id} className="p-4 space-y-3.5 transition-colors">
-                    {/* BARIS LENCANA STATUS MOBILE DENGAN TANGGAL DEADLINE */}
+                    {/* BARIS LENCANA STATUS MOBILE DENGAN TANGGAL DEADLINE MERAH BATA */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {renderCategoryBadge(task.category)}
 
-                      {/* LENCANA TANGGAL DEADLINE MOBILE */}
-                      <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2 py-0.5 rounded-md">
-                        <Calendar className="w-3 h-3 text-[#DF3B68]" />
+                      {/* LENCANA TANGGAL DEADLINE MOBILE (MERAH BATA) */}
+                      <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold bg-[#DF3B68] text-white px-2 py-0.5 rounded-md">
+                        <Calendar className="w-3 h-3 text-white/90" />
                         <span>{formattedDeadline}</span>
                       </span>
 
@@ -1062,6 +1089,12 @@ function TasksContent() {
                       <h3 className="font-bold text-stone-900 dark:text-slate-100 text-sm leading-snug">
                         {task.title}
                       </h3>
+
+                      {snippet && (
+                        <p className="text-xs text-stone-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                          {snippet}
+                        </p>
+                      )}
                       
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-slate-400 pt-0.5">
                         {task.unit && (
