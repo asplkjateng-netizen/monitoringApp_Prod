@@ -273,7 +273,7 @@ export default function NewTaskPage() {
       setStaffList(loadedStaff);
       setSelectedPics([user.id]);
 
-      // Scoping query template ke tusi unit aktif
+      // Scoping query template ke tusi seksi unit aktif
       let tplQuery = supabase.from('task_templates').select('*').order('title', { ascending: true });
       if (cleanTusi && cleanTusi !== 'UMUM') {
         tplQuery = tplQuery.ilike('tusi_type', cleanTusi);
@@ -1057,4 +1057,282 @@ export default function NewTaskPage() {
 
         {/* PIC PELAKSANA */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
-          <div clas
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
+            <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+              <Users className="w-4 h-4 text-[#DF3B68]" />
+              <span>Tetapkan PIC Pelaksana</span>
+            </div>
+
+            <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
+              <button
+                type="button"
+                onClick={() => setAssignmentMode('MANUAL')}
+                className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
+                  assignmentMode === 'MANUAL'
+                    ? 'bg-white text-stone-900 shadow-xs'
+                    : 'text-stone-500 hover:text-stone-900'
+                }`}
+              >
+                Penugasan Manual
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignmentMode('BROADCAST')}
+                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  assignmentMode === 'BROADCAST'
+                    ? 'bg-[#DF3B68] text-white shadow-xs'
+                    : 'text-stone-600 hover:text-[#DF3B68]'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5" />
+                <span>Broadcast Massal</span>
+              </button>
+            </div>
+          </div>
+
+          {assignmentMode === 'MANUAL' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-stone-500">
+                <span>Pilih satu atau beberapa pegawai pelaksana:</span>
+                <span className="font-semibold text-stone-700">{selectedPics.length} pegawai dipilih</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-1">
+                {staffList.map((staff) => {
+                  const isChecked = selectedPics.includes(staff.id);
+                  return (
+                    <div
+                      key={staff.id}
+                      onClick={() => togglePic(staff.id)}
+                      className={`p-3 rounded-2xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                        isChecked
+                          ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900'
+                          : 'border-stone-200/80 bg-white text-stone-600 hover:bg-stone-50'
+                      }`}
+                    >
+                      <div className="truncate pr-2">
+                        <p className="font-semibold truncate">{staff.full_name}</p>
+                        <p className="text-[10px] text-stone-400">NIP. {staff.nip} • {staff.role}</p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300'}`}>
+                        {isChecked && <CheckCircle2 className="w-3 h-3" />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {assignmentMode === 'BROADCAST' && (
+            <div className="space-y-4 bg-stone-50/70 p-4 sm:p-5 rounded-2xl border border-stone-200">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <Building className="w-4 h-4 text-[#DF3B68]" />
+                    <span>Pilih Lingkup Instansi Target Broadcast:</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-stone-500">
+                    Total: {broadcastStaffList.length} Pegawai
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('SEKSI')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'SEKSI'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🏢 Satu Seksi ({userTusiType})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('KANTOR')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'KANTOR'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🏛️ Satu Kantor (Seluruh Seksi KPPN)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBroadcastScope('WILAYAH')}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
+                      broadcastScope === 'WILAYAH'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
+                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                    }`}
+                  >
+                    🌐 Seluruh Wilayah (Semua KPPN & Kanwil)
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-stone-200 text-xs">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-emerald-600" />
+                  <span>
+                    Penerima: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <UserX className="w-4 h-4 text-rose-500" />
+                  <span>
+                    Dikecualikan: <strong className="text-rose-600 font-bold">{excludedPicIds.length}</strong> pegawai
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <UserX className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Daftar Pengecualian Pegawai:</span>
+                  </p>
+                  
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                    <input
+                      type="text"
+                      placeholder="Cari nama / NIP untuk dikecualikan..."
+                      value={exclusionSearch}
+                      onChange={(e) => setExclusionSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white rounded-xl border border-stone-200 focus:outline-none focus:ring-1 focus:ring-[#DF3B68]"
+                    />
+                  </div>
+                </div>
+
+                {loadingBroadcastStaff ? (
+                  <div className="py-6 text-center text-xs text-stone-400">Memuat data pegawai...</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredBroadcastStaff.map((staff) => {
+                      const isExcluded = excludedPicIds.includes(staff.id);
+                      return (
+                        <div
+                          key={staff.id}
+                          onClick={() => toggleExclusion(staff.id)}
+                          className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
+                            isExcluded
+                              ? 'border-rose-300 bg-rose-50/60 text-stone-400'
+                              : 'border-stone-200 bg-white text-stone-800 hover:bg-stone-50'
+                          }`}
+                        >
+                          <div className="truncate pr-2">
+                            <p className={`font-semibold truncate ${isExcluded ? 'line-through text-stone-400' : 'text-stone-900'}`}>
+                              {staff.full_name}
+                            </p>
+                            <p className="text-[10px] text-stone-400">
+                              {staff.role} • {staff.unit?.name || 'Unit'}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {isExcluded ? (
+                              <span className="text-[10px] font-bold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-200">
+                                Dikecualikan
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                Menerima
+                              </span>
+                            )}
+                            <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'border-stone-300'}`}>
+                              {isExcluded && <CheckCircle2 className="w-3 h-3" />}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+        </div>
+
+        {/* SUBTASKS */}
+        <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+            <div>
+              <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+                <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
+                <span>Tahapan Sub-Pekerjaan Awal & Batas Waktu (Opsional)</span>
+              </div>
+              <p className="text-[11px] text-stone-500 mt-0.5">
+                Batas waktu sub-tugas opsional dan tidak boleh melampaui tenggat tugas utama ({deadline || 'belum ditentukan'}).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddSubtask}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#DF3B68] hover:text-[#C72F58]"
+            >
+              <Plus className="w-3.5 h-3.5" /> Tambah Tahapan
+            </button>
+          </div>
+
+          <div className="space-y-2.5">
+            {subtasks.map((st, idx) => (
+              <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 bg-stone-50/70 rounded-2xl border border-stone-200">
+                <span className="text-xs font-semibold text-stone-400 w-5 text-left">{idx + 1}.</span>
+                <input
+                  type="text"
+                  placeholder={`Uraian sub-tahapan ke-${idx + 1}...`}
+                  value={st.title}
+                  onChange={(e) => handleSubtaskTitleChange(idx, e.target.value)}
+                  className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-stone-500 whitespace-nowrap">Batas:</span>
+                  <input
+                    type="date"
+                    max={deadline || undefined}
+                    value={st.deadline || ''}
+                    onChange={(e) => handleSubtaskDeadlineChange(idx, e.target.value)}
+                    className="px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                  />
+                  {subtasks.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSubtask(idx)}
+                      className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <Link
+            href="/tasks"
+            className="px-5 py-2.5 rounded-full border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-medium"
+          >
+            Batal
+          </Link>
+          <Button
+            type="submit"
+            isLoading={submitting}
+            className="bg-[#DF3B68] hover:bg-[#C72F58] text-white px-7 py-2.5 rounded-full shadow-sm text-xs font-semibold"
+          >
+            Simpan & Terbitkan Tugas
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
