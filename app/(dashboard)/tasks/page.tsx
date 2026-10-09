@@ -18,11 +18,16 @@ import {
   Square,
   Layers,
   BookOpen,
-  Link as LinkIcon,
   Loader2,
-  Tag
+  Tag,
+  Wrench
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+
+interface LinkItem {
+  name: string;
+  url: string;
+}
 
 interface SubtaskItem {
   id: string;
@@ -41,6 +46,8 @@ interface TaskItem {
   category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   legal_basis?: string;
   legal_basis_link?: string;
+  regulations?: LinkItem[] | null;
+  tools?: LinkItem[] | null;
   deadline: string;
   critical_days_threshold?: number;
   status: 'BELUM_DIKERJAKAN' | 'ON_PROGRESS' | 'TERKENDALA' | 'SELESAI';
@@ -78,14 +85,10 @@ function TasksContent() {
   const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
-  // Accordion Expand States
   const [expandedTaskIds, setExpandedTaskIds] = useState<string[]>([]);
   const [expandedDescIds, setExpandedDescIds] = useState<string[]>([]);
-
-  // Subtask Updating State (ID yang sedang diproses)
   const [updatingSubtaskId, setUpdatingSubtaskId] = useState<string | null>(null);
 
-  // Role & Multi-Unit State
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [unitList, setUnitList] = useState<UnitOption[]>([]);
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL_UNITS');
@@ -149,7 +152,6 @@ function TasksContent() {
 
   const fetchTasks = async (filterUnit: string, myUnitId: string, isAdmin: boolean) => {
     setLoading(true);
-
     try {
       let query = supabase
         .from('tasks')
@@ -298,6 +300,17 @@ function TasksContent() {
     }
   };
 
+  // Helper mendapatkan list regulasi dengan fallback data lama
+  const getRegulationsList = (task: TaskItem): LinkItem[] => {
+    if (task.regulations && Array.isArray(task.regulations) && task.regulations.length > 0) {
+      return task.regulations.filter((r) => r.name || r.url);
+    }
+    if (task.legal_basis) {
+      return [{ name: task.legal_basis, url: task.legal_basis_link || '' }];
+    }
+    return [];
+  };
+
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
       t.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -419,13 +432,12 @@ function TasksContent() {
 
   return (
     <div className="p-4 sm:p-6 md:p-8 space-y-5 md:space-y-6 max-w-7xl mx-auto">
-      
-      {/* HEADER & AKSI REKAM */}
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Daftar Pekerjaan</h1>
           <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1">
-            Pemantauan progres, klasifikasi tusi/tambahan/improvisasi, dan masa kritis.
+            Pemantauan progres, klasifikasi tusi/tambahan/improvisasi, multi-regulasi, dan tautan tools kerja.
           </p>
         </div>
         <Link
@@ -436,7 +448,7 @@ function TasksContent() {
         </Link>
       </div>
 
-      {/* FILTER BAR UTAMA */}
+      {/* FILTER BAR */}
       <div className="flex flex-col gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-stone-200/70 dark:border-slate-800 shadow-sm transition-colors">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="relative flex-1">
@@ -470,9 +482,8 @@ function TasksContent() {
           )}
         </div>
 
-        {/* Tab Filter Bar: Status & Kategori */}
+        {/* Tab Filter Status & Kategori */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-slate-800">
-          {/* Status Filter Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 scrollbar-none">
             {[
               { id: 'ALL', label: 'Semua' },
@@ -496,7 +507,6 @@ function TasksContent() {
             ))}
           </div>
 
-          {/* Kategori Filter Chips */}
           <div className="flex items-center gap-1.5 flex-wrap self-start sm:self-end lg:self-auto">
             <span className="text-[11px] font-semibold text-stone-400 dark:text-slate-500 flex items-center gap-1 mr-1">
               <Tag className="w-3 h-3" /> Jenis:
@@ -523,7 +533,7 @@ function TasksContent() {
         </div>
       </div>
 
-      {/* DAFTAR PEKERJAAN (ADAPTIVE VIEW) */}
+      {/* DAFTAR PEKERJAAN */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
         {loading ? (
           <div className="py-20 text-center text-sm text-stone-400 dark:text-slate-500 flex flex-col items-center justify-center gap-2">
@@ -534,21 +544,20 @@ function TasksContent() {
           <div className="py-20 text-center px-4">
             <p className="text-stone-600 dark:text-slate-300 font-medium text-sm">Tidak ada tugas ditemukan pada parameter ini</p>
             <p className="text-stone-400 dark:text-slate-500 text-xs mt-1">
-              Coba pilih siklus periode lain di menu atas atau sesuaikan saringan status/jenis pekerjaan.
+              Coba sesuaikan saringan status, kata kunci, atau jenis pekerjaan.
             </p>
           </div>
         ) : (
           <div>
-            {/* ------------------------------------------------------------- */}
-            {/* VIEW 1: DESKTOP TABLE/LIST VIEW (Layar >= md)                  */}
-            {/* ------------------------------------------------------------- */}
+            {/* VIEW 1: DESKTOP TABLE/LIST VIEW */}
             <div className="hidden md:block divide-y divide-stone-100 dark:divide-slate-800/80">
               {filteredTasks.map((task) => {
                 const isSubExpanded = expandedTaskIds.includes(task.id);
                 const isDescExpanded = expandedDescIds.includes(task.id);
                 const progressPct = getEffectiveProgress(task);
                 const subtasksCount = task.subtasks?.length || 0;
-                const hasLegalLink = !!task.legal_basis_link;
+                const regList = getRegulationsList(task);
+                const toolsList = task.tools && Array.isArray(task.tools) ? task.tools.filter((t) => t.name || t.url) : [];
                 const hasEvidence = !!task.evidence_link;
 
                 return (
@@ -596,7 +605,7 @@ function TasksContent() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        {(task.description || task.legal_basis || hasLegalLink) && (
+                        {(task.description || regList.length > 0 || toolsList.length > 0) && (
                           <button
                             type="button"
                             onClick={() => toggleDescription(task.id)}
@@ -626,15 +635,15 @@ function TasksContent() {
                           {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
 
-                        {hasLegalLink && (
+                        {toolsList.length > 0 && (
                           <a
-                            href={task.legal_basis_link}
+                            href={toolsList[0].url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors"
-                            title="Buka Dokumen Regulasi Cloud"
+                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors"
+                            title={`Buka Tool: ${toolsList[0].name}`}
                           >
-                            <LinkIcon className="w-3.5 h-3.5" /> Regulasi
+                            <Wrench className="w-3.5 h-3.5" /> Tools {toolsList.length > 1 ? `(${toolsList.length})` : ''}
                           </a>
                         )}
 
@@ -660,30 +669,68 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* Accordion Dasar Hukum Desktop */}
+                    {/* Accordion Detail: Dasar Hukum, Tools, & Petunjuk */}
                     {isDescExpanded && (
-                      <div className="px-5 pb-4 pt-1 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-2 animate-in fade-in duration-150">
-                        {task.legal_basis && (
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-700 dark:text-slate-300">
+                      <div className="px-5 pb-5 pt-2 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-3 animate-in fade-in duration-150">
+                        {regList.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs">
                             <span className="font-bold text-amber-900 dark:text-amber-400">Dasar Hukum:</span>
-                            <span className="font-mono bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-stone-200 dark:border-slate-700">{task.legal_basis}</span>
-                            {task.legal_basis_link && (
+                            {regList.map((reg, idx) => (
+                              <div key={idx} className="inline-flex items-center gap-1 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-stone-200 dark:border-slate-700 shadow-2xs">
+                                <span className="font-mono text-stone-800 dark:text-slate-200 font-semibold">{reg.name}</span>
+                                {reg.url && (
+                                  <a
+                                    href={reg.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 ml-1"
+                                    title="Buka Tautan Regulasi"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {toolsList.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs pt-0.5">
+                            <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
+                              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools:
+                            </span>
+                            {toolsList.map((tool, idx) => (
                               <a
-                                href={task.legal_basis_link}
+                                key={idx}
+                                href={tool.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 transition-colors font-medium shadow-2xs"
                               >
-                                <ExternalLink className="w-3 h-3" /> Buka Tautan Dokumen Regulasi
+                                <span>{tool.name}</span>
+                                <ExternalLink className="w-3 h-3 text-emerald-600" />
                               </a>
-                            )}
+                            ))}
                           </div>
                         )}
 
                         {task.description && (
-                          <div className="p-3 bg-white dark:bg-slate-800/90 rounded-xl border border-stone-200/70 dark:border-slate-700 text-xs text-stone-600 dark:text-slate-300 leading-relaxed">
-                            <p className="font-bold text-stone-800 dark:text-slate-200 mb-1">Petunjuk Teknis & Deskripsi:</p>
-                            {task.description}
+                          <div className="p-3.5 bg-white dark:bg-slate-800/95 rounded-2xl border border-stone-200/70 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-300 leading-relaxed shadow-2xs">
+                            <p className="font-bold text-stone-900 dark:text-slate-100 mb-2 border-b border-stone-100 dark:border-slate-700/60 pb-1.5 flex items-center gap-1.5">
+                              <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
+                              Petunjuk Teknis & Deskripsi:
+                            </p>
+                            
+                            {task.description.includes('<') && task.description.includes('>') ? (
+                              <div 
+                                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold text-stone-700 dark:text-slate-200"
+                                dangerouslySetInnerHTML={{ __html: task.description }}
+                              />
+                            ) : (
+                              <div className="whitespace-pre-wrap leading-relaxed">
+                                {task.description}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -753,27 +800,24 @@ function TasksContent() {
                         </div>
                       </div>
                     )}
-
                   </div>
                 );
               })}
             </div>
 
-            {/* ------------------------------------------------------------- */}
-            {/* VIEW 2: MOBILE ADAPTIVE TASK CARDS (Layar < md)               */}
-            {/* ------------------------------------------------------------- */}
+            {/* VIEW 2: MOBILE ADAPTIVE VIEW */}
             <div className="md:hidden divide-y divide-stone-100 dark:divide-slate-800">
               {filteredTasks.map((task) => {
                 const isSubExpanded = expandedTaskIds.includes(task.id);
                 const isDescExpanded = expandedDescIds.includes(task.id);
                 const progressPct = getEffectiveProgress(task);
                 const subtasksCount = task.subtasks?.length || 0;
-                const hasLegalLink = !!task.legal_basis_link;
+                const regList = getRegulationsList(task);
+                const toolsList = task.tools && Array.isArray(task.tools) ? task.tools.filter((t) => t.name || t.url) : [];
                 const hasEvidence = !!task.evidence_link;
 
                 return (
                   <div key={task.id} className="p-4 space-y-3.5 transition-colors">
-                    {/* Baris Badge Mobile */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {renderCategoryBadge(task.category)}
                       {getUrgencyBadge(task)}
@@ -783,7 +827,6 @@ function TasksContent() {
                       </span>
                     </div>
 
-                    {/* Judul & Detail Unit */}
                     <div className="space-y-1">
                       <h3 className="font-bold text-stone-900 dark:text-slate-100 text-sm leading-snug">
                         {task.title}
@@ -803,14 +846,12 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* Hambatan Kendala Jika Ada */}
                     {task.kendala_note && task.status === 'TERKENDALA' && (
                       <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-xl border border-rose-100 dark:border-rose-900/50">
                         <strong>Kendala:</strong> {task.kendala_note}
                       </p>
                     )}
 
-                    {/* Progress Bar Mobile */}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs font-semibold text-stone-600 dark:text-slate-300">
                         <span>Capaian Progres</span>
@@ -824,7 +865,6 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* Tombol Aksi Mobile Touch-Friendly */}
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         type="button"
@@ -837,7 +877,7 @@ function TasksContent() {
                       >
                         <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
                         <span>Subtugas ({subtasksCount})</span>
-                        {isSubExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </button>
 
                       <Link
@@ -849,9 +889,8 @@ function TasksContent() {
                       </Link>
                     </div>
 
-                    {/* Tombol Sekunder Mobile: Dasar Hukum, Regulasi & Bukti */}
                     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                      {(task.description || task.legal_basis || hasLegalLink) && (
+                      {(task.description || regList.length > 0 || toolsList.length > 0) && (
                         <button
                           type="button"
                           onClick={() => toggleDescription(task.id)}
@@ -867,14 +906,14 @@ function TasksContent() {
                         </button>
                       )}
 
-                      {hasLegalLink && (
+                      {toolsList.length > 0 && (
                         <a
-                          href={task.legal_basis_link}
+                          href={toolsList[0].url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap"
                         >
-                          <LinkIcon className="w-3 h-3" /> Link Regulasi
+                          <Wrench className="w-3 h-3" /> Tools
                         </a>
                       )}
 
@@ -890,81 +929,56 @@ function TasksContent() {
                       )}
                     </div>
 
-                    {/* Accordion Dasar Hukum Mobile */}
+                    {/* Accordion Mobile */}
                     {isDescExpanded && (
-                      <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-2 text-xs">
-                        {task.legal_basis && (
+                      <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-2.5 text-xs">
+                        {regList.length > 0 && (
                           <div>
-                            <span className="font-bold text-amber-900 dark:text-amber-400 block mb-0.5">Dasar Hukum:</span>
-                            <span className="font-mono bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-stone-200 dark:border-slate-700 block">
-                              {task.legal_basis}
-                            </span>
-                          </div>
-                        )}
-                        {task.description && (
-                          <div className="pt-1 text-stone-600 dark:text-slate-300 leading-relaxed">
-                            <span className="font-bold text-stone-800 dark:text-slate-200 block mb-0.5">Petunjuk Teknis:</span>
-                            {task.description}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Accordion Subtasks Mobile (Touch-Optimized) */}
-                    {isSubExpanded && (
-                      <div className="p-3 bg-stone-50 dark:bg-slate-800/60 rounded-2xl border border-stone-200 dark:border-slate-700 space-y-2.5 animate-in fade-in duration-150">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[11px] font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
-                            <span>Tahapan Checklist:</span>
-                          </p>
-                          <Link href={`/tasks/${task.id}`} className="text-[10px] text-[#DF3B68] font-bold hover:underline">
-                            Detail &rarr;
-                          </Link>
-                        </div>
-
-                        {!task.subtasks || task.subtasks.length === 0 ? (
-                          <p className="text-xs text-stone-400 dark:text-slate-500 italic py-2 text-center">
-                            Belum ada tahapan sub-pekerjaan.
-                          </p>
-                        ) : (
-                          <div className="space-y-1.5">
-                            {task.subtasks.map((st, idx) => {
-                              const isUpdating = updatingSubtaskId === st.id;
-
-                              return (
-                                <button
-                                  type="button"
-                                  key={st.id || idx}
-                                  disabled={isUpdating}
-                                  onClick={() => handleToggleSubtask(st.id, st.is_completed, task.id)}
-                                  className={`w-full p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 transition-all text-left ${
-                                    st.is_completed
-                                      ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-300'
-                                      : 'bg-white dark:bg-slate-800 border-stone-200 dark:border-slate-700 text-stone-800 dark:text-slate-200'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2 truncate flex-1 min-w-0">
-                                    {isUpdating ? (
-                                      <Loader2 className="w-4 h-4 text-[#DF3B68] animate-spin shrink-0" />
-                                    ) : st.is_completed ? (
-                                      <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                                    ) : (
-                                      <Square className="w-4 h-4 text-stone-400 dark:text-slate-500 shrink-0" />
-                                    )}
-                                    <span className={`truncate text-xs font-medium ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500' : 'text-stone-800 dark:text-slate-200'}`}>
-                                      {idx + 1}. {st.title}
-                                    </span>
-                                  </div>
-
-                                  {st.deadline && (
-                                    <span className="shrink-0 text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
-                                      {st.deadline}
-                                    </span>
+                            <span className="font-bold text-amber-900 dark:text-amber-400 block mb-1">Dasar Hukum:</span>
+                            <div className="space-y-1">
+                              {regList.map((r, idx) => (
+                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-slate-800 p-1.5 rounded border border-stone-200 dark:border-slate-700">
+                                  <span className="font-mono text-stone-800 dark:text-slate-200">{r.name}</span>
+                                  {r.url && (
+                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 text-[10px] flex items-center gap-0.5">
+                                      Buka <ExternalLink className="w-2.5 h-2.5" />
+                                    </a>
                                   )}
-                                </button>
-                              );
-                            })}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {toolsList.length > 0 && (
+                          <div>
+                            <span className="font-bold text-emerald-900 dark:text-emerald-400 block mb-1 flex items-center gap-1">
+                              <Wrench className="w-3 h-3" /> Tools / Aplikasi:
+                            </span>
+                            <div className="space-y-1">
+                              {toolsList.map((t, idx) => (
+                                <a key={idx} href={t.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between bg-emerald-50/80 dark:bg-emerald-950/60 p-1.5 rounded border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+                                  <span>{t.name}</span>
+                                  <ExternalLink className="w-3 h-3 text-emerald-600" />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {task.description && (
+                          <div className="pt-1 text-stone-700 dark:text-slate-300 leading-relaxed border-t border-amber-200/50 dark:border-amber-900/40">
+                            <span className="font-bold text-stone-800 dark:text-slate-200 block mb-1">Petunjuk Teknis:</span>
+                            {task.description.includes('<') && task.description.includes('>') ? (
+                              <div 
+                                className="space-y-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
+                                dangerouslySetInnerHTML={{ __html: task.description }}
+                              />
+                            ) : (
+                              <div className="whitespace-pre-wrap">
+                                {task.description}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
