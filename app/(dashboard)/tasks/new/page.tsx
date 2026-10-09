@@ -22,10 +22,10 @@ import {
   Building, 
   Link as LinkIcon, 
   Tag, 
-  BellRing,
-  RotateCw,
-  Wrench,
-  BookOpen
+  BellRing, 
+  RotateCw, 
+  Wrench, 
+  BookOpen 
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -54,6 +54,7 @@ interface TaskTemplate {
   id: string;
   tusi_type: string;
   title: string;
+  short_description?: string | null;
   category?: 'TUSI' | 'TAMBAHAN' | 'IMPROVISASI';
   description: string | null;
   legal_basis: string | null;
@@ -98,6 +99,7 @@ export default function NewTaskPage() {
   const [category, setCategory] = useState<'TUSI' | 'TAMBAHAN' | 'IMPROVISASI'>('TUSI');
   const [isClericalRecurring, setIsClericalRecurring] = useState<boolean>(true);
   const [title, setTitle] = useState('');
+  const [shortDescription, setShortDescription] = useState('');
   const [description, setDescription] = useState('');
 
   // Multi-Link Regulasi & Tools
@@ -367,6 +369,7 @@ export default function NewTaskPage() {
     const tpl = templates.find((t) => t.id === templateId);
     if (tpl) {
       setTitle(tpl.title);
+      setShortDescription(tpl.short_description || '');
       if (tpl.category) setCategory(tpl.category);
       setDescription(tpl.description || '');
 
@@ -534,6 +537,7 @@ export default function NewTaskPage() {
             .insert({
               tusi_type: userTusiType.toUpperCase(),
               title: title.trim(),
+              short_description: shortDescription.trim() || null,
               category,
               description: description.trim() || null,
               legal_basis: primaryLegalBasis,
@@ -561,6 +565,7 @@ export default function NewTaskPage() {
           unit_id: activeUnitId,
           template_id: createdTemplateId,
           title: title.trim(),
+          short_description: shortDescription.trim() || null,
           category,
           description: description.trim() || null,
           legal_basis: primaryLegalBasis,
@@ -664,7 +669,7 @@ export default function NewTaskPage() {
         <div>
           <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
           <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas tusi, petunjuk berstruktur daftar isi, multi-regulasi, tools, dan PIC tahapan.
+            Daftarkan tugas tusi, deskripsi singkat manual, petunjuk teknis H1, multi-regulasi, dan PIC tahapan.
           </p>
         </div>
       </div>
@@ -771,6 +776,24 @@ export default function NewTaskPage() {
               onChange={(e) => setTitle(e.target.value)}
               required
             />
+
+            {/* INPUT MANUAL: DESKRIPSI SINGKAT PEKERJAAN */}
+            <div className="space-y-1.5 text-left">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
+                <span>Deskripsi Singkat Pekerjaan (Gambaran Sekilas untuk Tampilan Daftar)</span>
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Contoh: Rekapitulasi atas Laporan Penertiban Ketidaksesuaian BMN atas Wasdal BMN Smt I 2026..."
+                value={shortDescription}
+                onChange={(e) => setShortDescription(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 leading-relaxed resize-none"
+              />
+              <p className="text-[11px] text-stone-400">
+                Teks ini yang akan langsung ditampilkan tepat di bawah judul tugas pada halaman daftar pekerjaan.
+              </p>
+            </div>
 
             {/* MULTI-DASAR HUKUM */}
             <div className="p-4 bg-stone-50/70 rounded-2xl border border-stone-200 space-y-3">
@@ -889,7 +912,7 @@ export default function NewTaskPage() {
             <div className="space-y-1.5 text-left">
               <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
-                <span>Petunjuk Teknis & Deskripsi Tugas (Gunakan Tombol H1 / + Seksi Bab untuk membuat Daftar Isi)</span>
+                <span>Petunjuk Teknis Lengkap & Detail (Gunakan Tombol H1 / + Seksi Bab untuk membuat Bab Daftar Isi)</span>
               </label>
               <RichTextEditor
                 value={description}
