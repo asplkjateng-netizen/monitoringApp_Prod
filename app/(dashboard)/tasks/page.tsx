@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -13,6 +13,7 @@ import {
   Building2,
   FileText,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CheckSquare,
   Square,
@@ -20,7 +21,9 @@ import {
   BookOpen,
   Loader2,
   Tag,
-  Wrench
+  Wrench,
+  ListCollapse,
+  FolderOpen
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -71,6 +74,247 @@ interface UnitOption {
   id: string;
   name: string;
   level: string;
+}
+
+// -------------------------------------------------------------
+// KOMPONEN PARSER DESKRIPSI ALA NOTION / GOOGLE DOCS (COLLAPSIBLE H1 + DAFTAR ISI)
+// -------------------------------------------------------------
+interface DocSection {
+  id: string;
+  title: string;
+  content: string;
+}
+
+function NotionDocViewer({ rawContent }: { rawContent: string }) {
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  const sections: DocSection[] = useMemo(() => {
+    if (!rawContent || !rawContent.trim()) return [];
+
+    // Jika mengandung tag H1 / H2 dari editor rich text
+    if (rawContent.includes('<h1') || rawContent.includes('<h2')) {
+      const parts = rawContent.split(/<h[12][^>]*>/i);
+      const result: DocSection[] = [];
+
+      parts.forEach((part, index) => {
+        if (!part.trim()) return;
+        const closingIdx = part.search(/<\/h[12]>/i);
+        if (closingIdx !== -1) {
+          const title = part.substring(0, closingIdx).replace(/<[^>]+>/g, '').trim();
+          const content = part.substring(closingIdx + 5).trim();
+          result.push({
+            id: `sec-${index}`,
+            title: title || `Bagian ${index + 1}`,
+            content: content
+          });
+        } else if (index === 0 && part.trim()) {
+          // Konten awal sebelum heading pertama
+          result.push({
+            id: `sec-intro`,
+            title: 'Pengantar / Ringkasan',
+            content: part
+          });
+        }
+      });
+      return result;
+    }
+
+    // Fallback: Mendeteksi format teks kapital seperti gambar (cth: "WAKTU PELAKSANAAN :", "RUANG LINGKUP :")
+    const lines = rawContent.split('\n');
+    const result: DocSection[] = [];
+    let currentTitle = '';
+    let currentBuffer: string[] = [];
+    let sectionIdx = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Cek apakah baris ini berupa judul bab kapital atau diakhiri titik dua / garis pemisah
+      const isHeadingPattern = 
+        (trimmed.endsWith(':') && trimmed.length < 60 && !trimmed.startsWith('http')) ||
+        (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) ||
+        /^[A-Z0-9\s.,()-]{4,45}:$/.test(trimmed);
+
+      if (isHeadingPattern) {
+        if (currentTitle || currentBuffer.length > 0) {
+          result.push({
+            id: `sec-${sectionIdx++}`,
+            title: currentTitle || 'Ringkasan Awal',
+            content: currentBuffer.join('\n').trim()
+          });
+          currentBuffer = [];
+        }
+        currentTitle = trimmed.replace(/:$/, '').replace(/-+$/, '').trim();
+        // Lewati baris strip di bawahnya jika ada
+        if (i < lines.length - 1 && lines[i + 1]?.trim().startsWith('---')) {
+          i++;
+        }
+      } else {
+        currentBuffer.push(line);
+      }
+    }
+
+    if (currentTitle || currentBuffer.length > 0) {
+      result.push({
+        id: `sec-${sectionIdx++}`,
+        title: currentTitle || 'Uraian Dokumen',
+        content: currentBuffer.join('\n').trim()
+      });
+    }
+
+    // Jika tidak terdeteksi pola apapun, kembalikan 1 seksi utuh
+    if (result.length === 0) {
+      return [{ id: 'sec-all', title: 'Rincian Petunjuk Teknis', content: rawContent }];
+    }
+
+    return result;
+  }, [rawContent]);
+
+  // Buka seksi pertama secara otomatis saat awal muat
+  useEffect(() => {
+    if (sections.length > 0) {
+      const initial: Record<string, boolean> = {};
+      sections.forEach((sec, idx) => {
+        initial[sec.id] = idx === 0; // Buka seksi pertama saja secara default
+      });
+      setOpenSections(initial);
+    }
+  }, [sections]);
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const expandAll = () => {
+    const allOpen: Record<string, boolean> = {};
+    sections.forEach((s) => (allOpen[s.id] = true));
+    setOpenSections(allOpen);
+  };
+
+  const collapseAll = () => {
+    setOpenSections({});
+  };
+
+  if (sections.length <= 1 && sections[0]?.title === 'Uraian Dokumen') {
+    return (
+      <div className="p-3.5 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/80 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
+        {rawContent.includes('<') && rawContent.includes('>') ? (
+          <div dangerouslySetInnerHTML={{ __html: rawContent }} />
+        ) : (
+          <div className="whitespace-pre-wrap">{rawContent}</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* DAFTAR ISI INTERAKTIF (TABLE OF CONTENTS) */}
+      <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/90 dark:border-slate-700 shadow-2xs">
+        <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700/60 text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
+            <ListCollapse className="w-3.5 h-3.5 text-[#DF3B68]" />
+            <span>Daftar Isi Petunjuk Teknis ({sections.length} Bab)</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={expandAll}
+              className="text-stone-500 hover:text-stone-900 dark:hover:text-white font-medium"
+            >
+              Buka Semua
+            </button>
+            <span className="text-stone-300 dark:text-slate-600">•</span>
+            <button
+              type="button"
+              onClick={collapseAll}
+              className="text-stone-500 hover:text-stone-900 dark:hover:text-white font-medium"
+            >
+              Tutup Semua
+            </button>
+          </div>
+        </div>
+
+        {/* Chips Daftar Isi yang bisa langsung diklik */}
+        <div className="flex flex-wrap gap-1.5 pt-2">
+          {sections.map((sec, idx) => {
+            const isOpen = !!openSections[sec.id];
+            return (
+              <button
+                type="button"
+                key={sec.id}
+                onClick={() => {
+                  setOpenSections((prev) => ({ ...prev, [sec.id]: true }));
+                  const el = document.getElementById(`heading-${sec.id}`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  isOpen
+                    ? 'bg-[#DF3B68]/10 text-[#DF3B68] border border-[#DF3B68]/30 font-bold'
+                    : 'bg-stone-50 dark:bg-slate-700/50 text-stone-600 dark:text-slate-300 hover:bg-stone-100 border border-stone-200/70 dark:border-slate-700'
+                }`}
+              >
+                <span className="text-[10px] opacity-60">{idx + 1}.</span>
+                <span>{sec.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* SEKSI ACCORDION PER BAB ALA NOTION */}
+      <div className="space-y-2">
+        {sections.map((sec, idx) => {
+          const isOpen = !!openSections[sec.id];
+
+          return (
+            <div
+              key={sec.id}
+              id={`heading-${sec.id}`}
+              className="border border-stone-200/90 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-800 shadow-2xs transition-all"
+            >
+              <button
+                type="button"
+                onClick={() => toggleSection(sec.id)}
+                className={`w-full p-3 text-left flex items-center justify-between gap-3 text-xs font-bold transition-colors ${
+                  isOpen
+                    ? 'bg-stone-50/80 dark:bg-slate-750 text-stone-900 dark:text-white border-b border-stone-100 dark:border-slate-700'
+                    : 'text-stone-700 dark:text-slate-200 hover:bg-stone-50 dark:hover:bg-slate-750'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <div className={`p-1 rounded-md transition-transform ${isOpen ? 'text-[#DF3B68]' : 'text-stone-400'}`}>
+                    {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </div>
+                  <span className="text-stone-400 dark:text-slate-500 font-mono text-[11px]">{idx + 1}.</span>
+                  <span className="truncate tracking-tight uppercase text-[11px] sm:text-xs">{sec.title}</span>
+                </div>
+                <span className="text-[10px] font-normal text-stone-400 dark:text-slate-500 shrink-0">
+                  {isOpen ? 'Tutup Konten' : 'Lihat Isi'}
+                </span>
+              </button>
+
+              {isOpen && (
+                <div className="p-3.5 bg-white dark:bg-slate-800 text-xs text-stone-700 dark:text-slate-200 leading-relaxed animate-in fade-in duration-150">
+                  {sec.content.includes('<') && sec.content.includes('>') ? (
+                    <div 
+                      className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
+                      dangerouslySetInnerHTML={{ __html: sec.content }}
+                    />
+                  ) : (
+                    <div className="whitespace-pre-wrap font-sans leading-relaxed">
+                      {sec.content}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function TasksContent() {
@@ -300,7 +544,6 @@ function TasksContent() {
     }
   };
 
-  // Helper mendapatkan list regulasi dengan fallback data lama
   const getRegulationsList = (task: TaskItem): LinkItem[] => {
     if (task.regulations && Array.isArray(task.regulations) && task.regulations.length > 0) {
       return task.regulations.filter((r) => r.name || r.url);
@@ -437,7 +680,7 @@ function TasksContent() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Daftar Pekerjaan</h1>
           <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1">
-            Pemantauan progres, klasifikasi tusi/tambahan/improvisasi, multi-regulasi, dan tautan tools kerja.
+            Pemantauan progres, deadline pasti, petunjuk berstruktur daftar isi, multi-regulasi, dan link tools.
           </p>
         </div>
         <Link
@@ -560,12 +803,26 @@ function TasksContent() {
                 const toolsList = task.tools && Array.isArray(task.tools) ? task.tools.filter((t) => t.name || t.url) : [];
                 const hasEvidence = !!task.evidence_link;
 
+                const formattedDeadline = parseSafeDate(task.deadline).toLocaleDateString('id-ID', { 
+                  day: 'numeric', 
+                  month: 'short', 
+                  year: 'numeric' 
+                });
+
                 return (
                   <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
                     <div className="p-5 flex items-center justify-between gap-4">
                       <div className="space-y-2 flex-1 min-w-0">
+                        {/* BARIS LENCANA STATUS DENGAN TANGGAL DEADLINE TEGAS */}
                         <div className="flex flex-wrap items-center gap-2">
                           {renderCategoryBadge(task.category)}
+
+                          {/* LENCANA TANGGAL DEADLINE UTAMA */}
+                          <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2.5 py-0.5 rounded-full shadow-2xs">
+                            <Calendar className="w-3.5 h-3.5 text-[#DF3B68]" />
+                            <span>Tenggat: {formattedDeadline}</span>
+                          </span>
+
                           {getUrgencyBadge(task)}
                           {getStatusBadge(task.status)}
                           
@@ -579,13 +836,9 @@ function TasksContent() {
                           <span className="text-[11px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800/50 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
                             {task.priority}
                           </span>
-                          <span className="text-xs text-stone-400 dark:text-slate-500 flex items-center gap-1 font-mono">
-                            <Calendar className="w-3.5 h-3.5" />
-                            Tenggat: {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </span>
                         </div>
 
-                        <h3 className="font-semibold text-stone-900 dark:text-slate-100 text-base">{task.title}</h3>
+                        <h3 className="font-bold text-stone-900 dark:text-slate-100 text-base">{task.title}</h3>
                         
                         {task.kendala_note && task.status === 'TERKENDALA' && (
                           <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 p-2 rounded-xl border border-rose-100 dark:border-rose-900/50">
@@ -604,6 +857,7 @@ function TasksContent() {
                         </div>
                       </div>
 
+                      {/* TOMBOL AKSI */}
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
                         {(task.description || regList.length > 0 || toolsList.length > 0) && (
                           <button
@@ -635,16 +889,24 @@ function TasksContent() {
                           {isSubExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </button>
 
+                        {/* MULTI-TOOLS BADGE LINK */}
                         {toolsList.length > 0 && (
-                          <a
-                            href={toolsList[0].url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors"
-                            title={`Buka Tool: ${toolsList[0].name}`}
-                          >
-                            <Wrench className="w-3.5 h-3.5" /> Tools {toolsList.length > 1 ? `(${toolsList.length})` : ''}
-                          </a>
+                          <div className="flex items-center gap-1">
+                            {toolsList.map((tool, idx) => (
+                              <a
+                                key={idx}
+                                href={tool.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors shadow-2xs"
+                                title={`Buka Tools: ${tool.name}`}
+                              >
+                                <Wrench className="w-3 h-3 text-emerald-600" />
+                                <span className="max-w-[120px] truncate">{tool.name || 'Tools'}</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            ))}
+                          </div>
                         )}
 
                         {hasEvidence && (
@@ -669,14 +931,17 @@ function TasksContent() {
                       </div>
                     </div>
 
-                    {/* Accordion Detail: Dasar Hukum, Tools, & Petunjuk */}
+                    {/* ACCORDION DETAIL: MULTI-REGULASI, TOOLS, & NOTION DOC VIEWER */}
                     {isDescExpanded && (
-                      <div className="px-5 pb-5 pt-2 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-3 animate-in fade-in duration-150">
+                      <div className="px-5 pb-5 pt-3 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-100 dark:border-amber-900/40 space-y-3.5 animate-in fade-in duration-150">
+                        {/* 1. Baris Multi-Regulasi */}
                         {regList.length > 0 && (
                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className="font-bold text-amber-900 dark:text-amber-400">Dasar Hukum:</span>
+                            <span className="font-bold text-amber-900 dark:text-amber-400 flex items-center gap-1">
+                              <BookOpen className="w-3.5 h-3.5 text-amber-700" /> Dasar Hukum:
+                            </span>
                             {regList.map((reg, idx) => (
-                              <div key={idx} className="inline-flex items-center gap-1 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-stone-200 dark:border-slate-700 shadow-2xs">
+                              <div key={idx} className="inline-flex items-center gap-1.5 bg-white dark:bg-slate-800 px-3 py-1 rounded-xl border border-stone-200 dark:border-slate-700 shadow-2xs">
                                 <span className="font-mono text-stone-800 dark:text-slate-200 font-semibold">{reg.name}</span>
                                 {reg.url && (
                                   <a
@@ -684,7 +949,7 @@ function TasksContent() {
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5 ml-1"
-                                    title="Buka Tautan Regulasi"
+                                    title="Buka Tautan JDIH"
                                   >
                                     <ExternalLink className="w-3 h-3" />
                                   </a>
@@ -694,10 +959,11 @@ function TasksContent() {
                           </div>
                         )}
 
+                        {/* 2. Baris Multi-Tools */}
                         {toolsList.length > 0 && (
                           <div className="flex flex-wrap items-center gap-2 text-xs pt-0.5">
                             <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
-                              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools:
+                              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools & Kertas Kerja:
                             </span>
                             {toolsList.map((tool, idx) => (
                               <a
@@ -705,7 +971,7 @@ function TasksContent() {
                                 href={tool.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 transition-colors font-medium shadow-2xs"
+                                className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-xl border border-emerald-300 dark:border-emerald-800 transition-colors font-semibold shadow-2xs"
                               >
                                 <span>{tool.name}</span>
                                 <ExternalLink className="w-3 h-3 text-emerald-600" />
@@ -714,23 +980,10 @@ function TasksContent() {
                           </div>
                         )}
 
+                        {/* 3. PARSER NOTION / GOOGLE DOCS UNTUK PETUNJUK TEKNIS */}
                         {task.description && (
-                          <div className="p-3.5 bg-white dark:bg-slate-800/95 rounded-2xl border border-stone-200/70 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-300 leading-relaxed shadow-2xs">
-                            <p className="font-bold text-stone-900 dark:text-slate-100 mb-2 border-b border-stone-100 dark:border-slate-700/60 pb-1.5 flex items-center gap-1.5">
-                              <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
-                              Petunjuk Teknis & Deskripsi:
-                            </p>
-                            
-                            {task.description.includes('<') && task.description.includes('>') ? (
-                              <div 
-                                className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold text-stone-700 dark:text-slate-200"
-                                dangerouslySetInnerHTML={{ __html: task.description }}
-                              />
-                            ) : (
-                              <div className="whitespace-pre-wrap leading-relaxed">
-                                {task.description}
-                              </div>
-                            )}
+                          <div className="pt-1">
+                            <NotionDocViewer rawContent={task.description} />
                           </div>
                         )}
                       </div>
@@ -816,10 +1069,24 @@ function TasksContent() {
                 const toolsList = task.tools && Array.isArray(task.tools) ? task.tools.filter((t) => t.name || t.url) : [];
                 const hasEvidence = !!task.evidence_link;
 
+                const formattedDeadline = parseSafeDate(task.deadline).toLocaleDateString('id-ID', { 
+                  day: 'numeric', 
+                  month: 'short', 
+                  year: 'numeric' 
+                });
+
                 return (
                   <div key={task.id} className="p-4 space-y-3.5 transition-colors">
+                    {/* BARIS LENCANA STATUS MOBILE DENGAN TANGGAL DEADLINE */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {renderCategoryBadge(task.category)}
+
+                      {/* LENCANA TANGGAL DEADLINE MOBILE */}
+                      <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold bg-stone-900 text-white dark:bg-slate-100 dark:text-slate-900 px-2 py-0.5 rounded-md">
+                        <Calendar className="w-3 h-3 text-[#DF3B68]" />
+                        <span>{formattedDeadline}</span>
+                      </span>
+
                       {getUrgencyBadge(task)}
                       {getStatusBadge(task.status)}
                       <span className="text-[10px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
@@ -839,10 +1106,6 @@ function TasksContent() {
                             {task.unit.name}
                           </span>
                         )}
-                        <span className="inline-flex items-center gap-1 font-mono">
-                          <Calendar className="w-3.5 h-3.5 text-stone-400" />
-                          {parseSafeDate(task.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </span>
                       </div>
                     </div>
 
@@ -901,21 +1164,22 @@ function TasksContent() {
                           }`}
                         >
                           <BookOpen className="w-3 h-3 text-amber-600" />
-                          <span>Dasar Hukum</span>
+                          <span>Dasar Hukum & Petunjuk</span>
                           {isDescExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
                         </button>
                       )}
 
-                      {toolsList.length > 0 && (
+                      {toolsList.map((tool, idx) => (
                         <a
-                          href={toolsList[0].url}
+                          key={idx}
+                          href={tool.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 whitespace-nowrap"
+                          className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 whitespace-nowrap"
                         >
-                          <Wrench className="w-3 h-3" /> Tools
+                          <Wrench className="w-3 h-3 text-emerald-600" /> {tool.name || 'Tools'}
                         </a>
-                      )}
+                      ))}
 
                       {hasEvidence && (
                         <a
@@ -929,18 +1193,18 @@ function TasksContent() {
                       )}
                     </div>
 
-                    {/* Accordion Mobile */}
+                    {/* ACCORDION MOBILE DENGAN NOTION DOC VIEWER */}
                     {isDescExpanded && (
-                      <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-2.5 text-xs">
+                      <div className="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-900/40 space-y-3 text-xs">
                         {regList.length > 0 && (
                           <div>
                             <span className="font-bold text-amber-900 dark:text-amber-400 block mb-1">Dasar Hukum:</span>
                             <div className="space-y-1">
                               {regList.map((r, idx) => (
-                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-slate-800 p-1.5 rounded border border-stone-200 dark:border-slate-700">
+                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-slate-800 p-2 rounded-xl border border-stone-200 dark:border-slate-700">
                                   <span className="font-mono text-stone-800 dark:text-slate-200">{r.name}</span>
                                   {r.url && (
-                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 text-[10px] flex items-center gap-0.5">
+                                    <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 text-[11px] flex items-center gap-0.5">
                                       Buka <ExternalLink className="w-2.5 h-2.5" />
                                     </a>
                                   )}
@@ -953,11 +1217,11 @@ function TasksContent() {
                         {toolsList.length > 0 && (
                           <div>
                             <span className="font-bold text-emerald-900 dark:text-emerald-400 block mb-1 flex items-center gap-1">
-                              <Wrench className="w-3 h-3" /> Tools / Aplikasi:
+                              <Wrench className="w-3 h-3" /> Tools / Kertas Kerja:
                             </span>
                             <div className="space-y-1">
                               {toolsList.map((t, idx) => (
-                                <a key={idx} href={t.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between bg-emerald-50/80 dark:bg-emerald-950/60 p-1.5 rounded border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300">
+                                <a key={idx} href={t.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between bg-emerald-50/80 dark:bg-emerald-950/60 p-2 rounded-xl border border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300 font-semibold">
                                   <span>{t.name}</span>
                                   <ExternalLink className="w-3 h-3 text-emerald-600" />
                                 </a>
@@ -967,18 +1231,8 @@ function TasksContent() {
                         )}
 
                         {task.description && (
-                          <div className="pt-1 text-stone-700 dark:text-slate-300 leading-relaxed border-t border-amber-200/50 dark:border-amber-900/40">
-                            <span className="font-bold text-stone-800 dark:text-slate-200 block mb-1">Petunjuk Teknis:</span>
-                            {task.description.includes('<') && task.description.includes('>') ? (
-                              <div 
-                                className="space-y-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4"
-                                dangerouslySetInnerHTML={{ __html: task.description }}
-                              />
-                            ) : (
-                              <div className="whitespace-pre-wrap">
-                                {task.description}
-                              </div>
-                            )}
+                          <div className="pt-1 border-t border-amber-200/50 dark:border-amber-900/40">
+                            <NotionDocViewer rawContent={task.description} />
                           </div>
                         )}
                       </div>
