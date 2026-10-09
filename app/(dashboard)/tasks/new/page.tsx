@@ -25,7 +25,9 @@ import {
   BellRing, 
   RotateCw, 
   Wrench, 
-  BookOpen 
+  BookOpen,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -114,9 +116,10 @@ export default function NewTaskPage() {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
-  // Fleksibilitas Deadline Lintas Bulan
+  // Fleksibilitas Deadline Lintas Bulan & Bulan Berkenaan Bebas
   const [deadlineMode, setDeadlineMode] = useState<'FORMULA' | 'CUSTOM'>('FORMULA');
-  const [deadlineRule, setDeadlineRule] = useState<'END_OF_PERIOD' | 'NEXT_MONTH_DATE' | 'SAME_MONTH_DATE'>('NEXT_MONTH_DATE');
+  const [deadlineRule, setDeadlineRule] = useState<'NEXT_MONTH_DATE' | 'END_OF_PERIOD' | 'CURRENT_MONTH_CUSTOM' | 'SAME_MONTH_DATE'>('CURRENT_MONTH_CUSTOM');
+  const [customPeriodMonthIndex, setCustomPeriodMonthIndex] = useState<number>(1);
   const [exactDay, setExactDay] = useState<number>(15);
   const [customDayInput, setCustomDayInput] = useState<string>('15');
   const [deadline, setDeadline] = useState('');
@@ -151,7 +154,7 @@ export default function NewTaskPage() {
     if (periodType !== 'INSIDENTIL' && deadlineMode === 'FORMULA') {
       calculateRecurringDeadline();
     }
-  }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, exactDay, deadlineMode]);
+  }, [periodType, selectedQuarter, selectedSemester, selectedMonth, selectedYear, deadlineRule, customPeriodMonthIndex, exactDay, deadlineMode]);
 
   useEffect(() => {
     if (assignmentMode === 'BROADCAST') {
@@ -159,6 +162,7 @@ export default function NewTaskPage() {
     }
   }, [assignmentMode, broadcastScope, unitId]);
 
+  // Kalkulasi Deadline Rumus Fleksibel (Termasuk Bulan Berkenaan & Tanggal Manual)
   const calculateRecurringDeadline = () => {
     let targetYear = selectedYear;
     let targetMonth = 1;
@@ -174,43 +178,49 @@ export default function NewTaskPage() {
         targetMonth = selectedMonth;
       }
     } else if (periodType === 'TRIWULANAN') {
-      const quarterEndMonth = selectedQuarter * 3;
       const quarterStartMonth = (selectedQuarter - 1) * 3 + 1;
+      const quarterEndMonth = selectedQuarter * 3;
 
-      if (deadlineRule === 'END_OF_PERIOD') {
-        targetMonth = quarterEndMonth;
-      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+      if (deadlineRule === 'NEXT_MONTH_DATE') {
         targetMonth = quarterEndMonth + 1;
         if (targetMonth > 12) {
           targetMonth = 1;
           targetYear += 1;
         }
+      } else if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = quarterEndMonth;
       } else if (deadlineRule === 'SAME_MONTH_DATE') {
         targetMonth = quarterStartMonth;
+      } else if (deadlineRule === 'CURRENT_MONTH_CUSTOM') {
+        targetMonth = quarterStartMonth + (customPeriodMonthIndex - 1);
       }
     } else if (periodType === 'SEMESTERAN') {
-      const semEndMonth = selectedSemester === 1 ? 6 : 12;
       const semStartMonth = selectedSemester === 1 ? 1 : 7;
+      const semEndMonth = selectedSemester === 1 ? 6 : 12;
 
-      if (deadlineRule === 'END_OF_PERIOD') {
-        targetMonth = semEndMonth;
-      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+      if (deadlineRule === 'NEXT_MONTH_DATE') {
         targetMonth = semEndMonth + 1;
         if (targetMonth > 12) {
           targetMonth = 1;
           targetYear += 1;
         }
+      } else if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = semEndMonth;
       } else if (deadlineRule === 'SAME_MONTH_DATE') {
         targetMonth = semStartMonth;
+      } else if (deadlineRule === 'CURRENT_MONTH_CUSTOM') {
+        targetMonth = semStartMonth + (customPeriodMonthIndex - 1);
       }
     } else if (periodType === 'TAHUNAN') {
-      if (deadlineRule === 'END_OF_PERIOD') {
-        targetMonth = 12;
-      } else if (deadlineRule === 'NEXT_MONTH_DATE') {
+      if (deadlineRule === 'NEXT_MONTH_DATE') {
         targetMonth = 1;
         targetYear += 1;
+      } else if (deadlineRule === 'END_OF_PERIOD') {
+        targetMonth = 12;
       } else if (deadlineRule === 'SAME_MONTH_DATE') {
         targetMonth = 1;
+      } else if (deadlineRule === 'CURRENT_MONTH_CUSTOM') {
+        targetMonth = Math.min(Math.max(customPeriodMonthIndex, 1), 12);
       }
     }
 
@@ -430,9 +440,22 @@ export default function NewTaskPage() {
     );
   };
 
-  // HANDLER SUB-TUGAS & PIC OPSIONAL
+  // HANDLER SUB-TUGAS: TAMBAH, HAPUS, & GESER URUTAN (REORDER ▲ / ▼)
   const handleAddSubtask = () => setSubtasks((prev) => [...prev, { title: '', deadline: '', pic_id: '' }]);
   const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
+
+  const handleMoveSubtask = (index: number, direction: 'UP' | 'DOWN') => {
+    setSubtasks((prev) => {
+      const copy = [...prev];
+      const targetIndex = direction === 'UP' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= copy.length) return prev;
+      const temp = copy[index];
+      copy[index] = copy[targetIndex];
+      copy[targetIndex] = temp;
+      return copy;
+    });
+  };
+
   const handleSubtaskTitleChange = (index: number, val: string) => {
     setSubtasks((prev) => {
       const updated = [...prev];
@@ -609,16 +632,18 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks & Subtask PICs (Opsional)
+      // 4. Simpan Subtasks (dengan order_index berurutan) & Subtask PICs
       const validSubtasks = subtasks.filter((s) => s.title.trim().length > 0);
       if (validSubtasks.length > 0) {
-        for (const st of validSubtasks) {
+        for (let idx = 0; idx < validSubtasks.length; idx++) {
+          const st = validSubtasks[idx];
           const { data: createdSubtask } = await supabase
             .from('subtasks')
             .insert({
               task_id: taskId,
               title: st.title.trim(),
               deadline: st.deadline || null,
+              order_index: idx + 1,
               is_completed: false,
               evidence_link_type: 'INHERIT',
             })
@@ -650,6 +675,36 @@ export default function NewTaskPage() {
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ];
+
+  // Helper opsi bulan pada mode "Bulan Berkenaan"
+  const getPeriodMonthOptions = () => {
+    if (periodType === 'TRIWULANAN') {
+      const qStart = (selectedQuarter - 1) * 3;
+      return [
+        { index: 1, label: `Bulan ke-1 (${monthNames[qStart]})` },
+        { index: 2, label: `Bulan ke-2 (${monthNames[qStart + 1]})` },
+        { index: 3, label: `Bulan ke-3 (${monthNames[qStart + 2]}) - Akhir TW` },
+      ];
+    }
+    if (periodType === 'SEMESTERAN') {
+      const sStart = selectedSemester === 1 ? 0 : 6;
+      return [
+        { index: 1, label: `Bulan ke-1 (${monthNames[sStart]})` },
+        { index: 2, label: `Bulan ke-2 (${monthNames[sStart + 1]})` },
+        { index: 3, label: `Bulan ke-3 (${monthNames[sStart + 2]})` },
+        { index: 4, label: `Bulan ke-4 (${monthNames[sStart + 3]})` },
+        { index: 5, label: `Bulan ke-5 (${monthNames[sStart + 4]})` },
+        { index: 6, label: `Bulan ke-6 (${monthNames[sStart + 5]}) - Akhir Smt` },
+      ];
+    }
+    if (periodType === 'TAHUNAN') {
+      return monthNames.map((name, i) => ({
+        index: i + 1,
+        label: `Bulan ${name}`,
+      }));
+    }
+    return [{ index: 1, label: 'Bulan Berjalan' }];
+  };
 
   const filteredBroadcastStaff = broadcastStaffList.filter((s) =>
     s.full_name?.toLowerCase().includes(exclusionSearch.toLowerCase()) ||
@@ -922,7 +977,7 @@ export default function NewTaskPage() {
             </div>
           </div>
 
-          {/* SIKLUS & TENGGAT */}
+          {/* SIKLUS & TENGGAT WAKTU FLEKSIBEL */}
           <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
             <div className="p-3.5 bg-white rounded-xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -1050,7 +1105,7 @@ export default function NewTaskPage() {
               )}
             </div>
 
-            {/* Pilihan Fleksibilitas Tenggat Lintas Bulan */}
+            {/* Pilihan Fleksibilitas Tenggat Lintas Bulan & Bulan Berkenaan */}
             {periodType !== 'INSIDENTIL' && (
               <div className="pt-3 border-t border-stone-200/60 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1067,7 +1122,7 @@ export default function NewTaskPage() {
                         deadlineMode === 'FORMULA' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-600 hover:text-stone-900'
                       }`}
                     >
-                      Otomatis Rumus (M+1 / Akhir Periode)
+                      Otomatis Rumus (M+1 / Bulan Berkenaan)
                     </button>
                     <button
                       type="button"
@@ -1083,17 +1138,38 @@ export default function NewTaskPage() {
 
                 {deadlineMode === 'FORMULA' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <div>
+                    <div className="space-y-2">
                       <label className="block text-[11px] font-medium text-stone-600 mb-1">1. Posisi Bulan Batas:</label>
                       <select
                         value={deadlineRule}
                         onChange={(e) => setDeadlineRule(e.target.value as any)}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-medium"
                       >
+                        <option value="CURRENT_MONTH_CUSTOM">Bulan Berkenaan (Pilih Bulan Tertentu)</option>
                         <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
                         <option value="END_OF_PERIOD">Bulan Terakhir Periode Berkenaan</option>
                         <option value="SAME_MONTH_DATE">Bulan Pertama / Awal Periode</option>
                       </select>
+
+                      {/* Dropdown Spesifik Bulan Berkenaan jika dipilih */}
+                      {deadlineRule === 'CURRENT_MONTH_CUSTOM' && periodType !== 'BULANAN' && (
+                        <div className="p-2.5 bg-rose-50/50 rounded-xl border border-rose-200/80 space-y-1">
+                          <label className="block text-[10px] font-bold text-rose-800">
+                            Pilih Bulan Berkenaan dalam Siklus:
+                          </label>
+                          <select
+                            value={customPeriodMonthIndex}
+                            onChange={(e) => setCustomPeriodMonthIndex(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-rose-300 bg-white text-xs font-semibold text-rose-900"
+                          >
+                            {getPeriodMonthOptions().map((opt) => (
+                              <option key={opt.index} value={opt.index}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -1133,7 +1209,8 @@ export default function NewTaskPage() {
                             const val = Number(e.target.value);
                             if (val >= 1 && val <= 31) setExactDay(val);
                           }}
-                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center"
+                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center font-bold"
+                          title="Ketik tanggal manual 1 - 31"
                         />
                       </div>
                     </div>
@@ -1430,16 +1507,16 @@ export default function NewTaskPage() {
           )}
         </div>
 
-        {/* SUBTASKS DENGAN FITUR PEMILIHAN PIC OPSIONAL */}
+        {/* SUBTASKS: DENGAN REORDER (▲ / ▼) & PEMILIHAN PIC OPSIONAL */}
         <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3">
             <div>
               <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
-                <span>Tahapan Sub-Pekerjaan & PIC Pelaksana (Opsional)</span>
+                <span>Tahapan Sub-Pekerjaan, Urutan & PIC Pelaksana</span>
               </div>
               <p className="text-[11px] text-stone-400 mt-0.5">
-                Pilih PIC untuk tiap tahapan jika tugas dibagi per pegawai. Jika tidak dipilih, dapat ditentukan nanti.
+                Gunakan tombol panah Naik (▲) / Turun (▼) untuk mengatur alur urutan tahapan secara fleksibel.
               </p>
             </div>
             <button
@@ -1454,7 +1531,31 @@ export default function NewTaskPage() {
           <div className="space-y-2.5">
             {subtasks.map((st, idx) => (
               <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 bg-stone-50/70 rounded-2xl border border-stone-200">
-                <span className="text-xs font-semibold text-stone-400 w-5 text-left">{idx + 1}.</span>
+                {/* Tombol Reorder Naik & Turun */}
+                <div className="flex items-center gap-1 self-start sm:self-auto">
+                  <div className="flex flex-col">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => handleMoveSubtask(idx, 'UP')}
+                      className="p-1 text-stone-500 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white rounded transition-colors"
+                      title="Geser ke atas"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === subtasks.length - 1}
+                      onClick={() => handleMoveSubtask(idx, 'DOWN')}
+                      className="p-1 text-stone-500 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white rounded transition-colors"
+                      title="Geser ke bawah"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <span className="text-xs font-bold text-stone-600 w-5 text-center">{idx + 1}.</span>
+                </div>
+
                 <input
                   type="text"
                   placeholder={`Uraian sub-tahapan ke-${idx + 1}...`}
@@ -1463,7 +1564,7 @@ export default function NewTaskPage() {
                   className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
 
-                {/* DROPDOWN PEMILIH PIC TAHAPAN (OPSIONAL) */}
+                {/* Dropdown PIC Tahapan */}
                 <div className="relative">
                   <select
                     value={st.pic_id || ''}
@@ -1493,6 +1594,7 @@ export default function NewTaskPage() {
                       type="button"
                       onClick={() => handleRemoveSubtask(idx)}
                       className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                      title="Hapus tahapan"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
