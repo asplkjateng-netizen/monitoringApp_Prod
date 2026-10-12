@@ -27,7 +27,8 @@ import {
   Wrench, 
   BookOpen,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Award
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -68,6 +69,7 @@ interface TaskTemplate {
   exact_day?: number;
   critical_days_threshold?: number;
   is_recurring?: boolean;
+  max_score_days_before?: number;
 }
 
 interface SubtaskDraft {
@@ -116,7 +118,7 @@ export default function NewTaskPage() {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
-  // Fleksibilitas Deadline Lintas Bulan & Bulan Berkenaan Bebas
+  // Fleksibilitas Deadline
   const [deadlineMode, setDeadlineMode] = useState<'FORMULA' | 'CUSTOM'>('FORMULA');
   const [deadlineRule, setDeadlineRule] = useState<'NEXT_MONTH_DATE' | 'END_OF_PERIOD' | 'CURRENT_MONTH_CUSTOM' | 'SAME_MONTH_DATE'>('CURRENT_MONTH_CUSTOM');
   const [customPeriodMonthIndex, setCustomPeriodMonthIndex] = useState<number>(1);
@@ -124,7 +126,11 @@ export default function NewTaskPage() {
   const [customDayInput, setCustomDayInput] = useState<string>('15');
   const [deadline, setDeadline] = useState('');
 
-  // Pengaturan Masa Kritis Kustom (H-X)
+  // FITUR: Batas Waktu Nilai Maksimal (Target Kinerja Optimal H-X)
+  const [enableMaxScore, setEnableMaxScore] = useState<boolean>(true);
+  const [maxScoreDaysBefore, setMaxScoreDaysBefore] = useState<number>(2);
+
+  // Pengaturan Masa Kritis Kustom & Prioritas
   const [criticalDaysThreshold, setCriticalDaysThreshold] = useState<number>(3);
   const [priority, setPriority] = useState<'TINGGI' | 'SEDANG' | 'RENDAH'>('SEDANG');
 
@@ -162,7 +168,7 @@ export default function NewTaskPage() {
     }
   }, [assignmentMode, broadcastScope, unitId]);
 
-  // Kalkulasi Deadline Rumus Fleksibel (Termasuk Bulan Berkenaan & Tanggal Manual)
+  // Kalkulasi Deadline Rumus Fleksibel
   const calculateRecurringDeadline = () => {
     let targetYear = selectedYear;
     let targetMonth = 1;
@@ -231,6 +237,18 @@ export default function NewTaskPage() {
     const formattedDay = String(effectiveDay).padStart(2, '0');
     setDeadline(`${targetYear}-${formattedMonth}-${formattedDay}`);
   };
+
+  // Kalkulasi Fisik Tanggal Nilai Maksimal (H-X)
+  const maxScoreDeadline = useMemo(() => {
+    if (!deadline || !enableMaxScore || maxScoreDaysBefore <= 0) return null;
+    const d = new Date(deadline);
+    if (isNaN(d.getTime())) return null;
+    d.setDate(d.getDate() - maxScoreDaysBefore);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, [deadline, enableMaxScore, maxScoreDaysBefore]);
 
   const getPeriodMonthValue = (): number => {
     if (periodType === 'BULANAN') return selectedMonth;
@@ -405,6 +423,14 @@ export default function NewTaskPage() {
         setExactDay(tpl.exact_day);
         setCustomDayInput(String(tpl.exact_day));
       }
+
+      // Deteksi Template Batas Nilai Maksimal
+      if (typeof tpl.max_score_days_before === 'number' && tpl.max_score_days_before > 0) {
+        setEnableMaxScore(true);
+        setMaxScoreDaysBefore(tpl.max_score_days_before);
+      } else {
+        setEnableMaxScore(false);
+      }
     }
   };
 
@@ -440,7 +466,7 @@ export default function NewTaskPage() {
     );
   };
 
-  // HANDLER SUB-TUGAS: TAMBAH, HAPUS, & GESER URUTAN (REORDER ▲ / ▼)
+  // Reorder Subtasks
   const handleAddSubtask = () => setSubtasks((prev) => [...prev, { title: '', deadline: '', pic_id: '' }]);
   const handleRemoveSubtask = (index: number) => setSubtasks((prev) => prev.filter((_, i) => i !== index));
 
@@ -572,6 +598,7 @@ export default function NewTaskPage() {
               exact_day: exactDay,
               critical_days_threshold: Number(criticalDaysThreshold) || 3,
               is_recurring: periodType !== 'INSIDENTIL' && isClericalRecurring,
+              max_score_days_before: enableMaxScore ? Number(maxScoreDaysBefore) || 0 : 0,
               created_by_unit: activeUnitId
             })
             .select('id')
@@ -581,7 +608,7 @@ export default function NewTaskPage() {
         }
       }
 
-      // 2. Simpan Tugas Utama
+      // 2. Simpan Tugas Utama (Termasuk Batas Nilai Maksimal)
       const { data: newTask, error: taskError } = await supabase
         .from('tasks')
         .insert({
@@ -599,6 +626,8 @@ export default function NewTaskPage() {
           period_month: getPeriodMonthValue(),
           period_year: selectedYear,
           deadline,
+          max_score_days_before: enableMaxScore ? Number(maxScoreDaysBefore) || 0 : 0,
+          max_score_deadline: enableMaxScore && maxScoreDeadline ? maxScoreDeadline : null,
           critical_days_threshold: Number(criticalDaysThreshold) || 3,
           priority,
           status: 'BELUM_DIKERJAKAN',
@@ -614,7 +643,7 @@ export default function NewTaskPage() {
 
       const taskId = newTask.id;
 
-      // 3. Simpan PIC Pelaksana Tugas Utama & Notifikasi
+      // 3. Simpan PIC Pelaksana & Notifikasi
       if (finalPics.length > 0) {
         const picPayloads = finalPics.map((picUserId) => ({
           task_id: taskId,
@@ -632,7 +661,7 @@ export default function NewTaskPage() {
         await supabase.from('notifications').insert(notifPayloads);
       }
 
-      // 4. Simpan Subtasks (dengan order_index berurutan) & Subtask PICs
+      // 4. Simpan Subtasks
       const validSubtasks = subtasks.filter((s) => s.title.trim().length > 0);
       if (validSubtasks.length > 0) {
         for (let idx = 0; idx < validSubtasks.length; idx++) {
@@ -668,7 +697,7 @@ export default function NewTaskPage() {
   };
 
   if (loading) {
-    return <div className="p-8 text-center text-sm text-stone-500">Menyiapkan formulir rekam tugas...</div>;
+    return <div className="p-8 text-center text-sm text-stone-500 dark:text-slate-400">Menyiapkan formulir rekam tugas...</div>;
   }
 
   const monthNames = [
@@ -676,7 +705,6 @@ export default function NewTaskPage() {
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ];
 
-  // Helper opsi bulan pada mode "Bulan Berkenaan"
   const getPeriodMonthOptions = () => {
     if (periodType === 'TRIWULANAN') {
       const qStart = (selectedQuarter - 1) * 3;
@@ -717,20 +745,20 @@ export default function NewTaskPage() {
       <div className="flex items-center gap-3">
         <Link
           href="/tasks"
-          className="p-2 rounded-xl border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 transition-colors shadow-sm"
+          className="p-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#131B26] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#1A2332] transition-colors shadow-sm"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Rekam Tugas Baru</h1>
-          <p className="text-xs text-stone-500 mt-0.5">
-            Daftarkan tugas tusi, deskripsi singkat manual, petunjuk teknis H1, multi-regulasi, dan PIC tahapan.
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Rekam Tugas Baru</h1>
+          <p className="text-xs text-stone-500 dark:text-slate-400 mt-0.5">
+            Daftarkan tugas tusi, deskripsi singkat manual, petunjuk teknis H1, multi-regulasi, dan target nilai maksimal H-X.
           </p>
         </div>
       </div>
 
       {errorMessage && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+        <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span>{errorMessage}</span>
         </div>
@@ -738,21 +766,21 @@ export default function NewTaskPage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Template Selector */}
-        <div className="bg-white rounded-3xl p-6 border border-stone-200/70 shadow-sm space-y-3">
+        <div className="bg-white dark:bg-[#131B26] rounded-3xl p-6 border border-stone-200/70 dark:border-white/10 shadow-sm space-y-3 transition-colors">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-stone-800 font-semibold text-sm">
+            <div className="flex items-center gap-2 text-stone-800 dark:text-slate-100 font-semibold text-sm">
               <Sparkles className="w-4 h-4 text-[#DF3B68]" />
               <span>Pilih dari Master Bank Tusi (Opsional)</span>
             </div>
-            <span className="text-[11px] text-stone-500 font-medium">
-              Lingkup Seksi: <strong className="text-stone-800 font-bold">{userTusiType}</strong>
+            <span className="text-[11px] text-stone-500 dark:text-slate-400 font-medium">
+              Lingkup Seksi: <strong className="text-stone-800 dark:text-slate-200 font-bold">{userTusiType}</strong>
             </span>
           </div>
 
           <select
             value={selectedTemplateId}
             onChange={(e) => handleSelectTemplate(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-stone-200 bg-stone-50/50 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+            className="w-full px-4 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-stone-50/50 dark:bg-[#1A2332] text-xs text-stone-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
           >
             <option value="">-- Buat Tugas Mandiri Baru --</option>
             {deduplicatedTemplates.map((tpl) => (
@@ -764,16 +792,16 @@ export default function NewTaskPage() {
         </div>
 
         {/* Rincian Informasi Tugas */}
-        <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
-            <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+        <div className="bg-white dark:bg-[#131B26] rounded-3xl p-6 md:p-8 border border-stone-200/70 dark:border-white/10 shadow-sm space-y-5 transition-colors">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 dark:border-white/5 pb-3">
+            <div className="flex items-center gap-2 text-stone-800 dark:text-slate-100 font-bold text-sm">
               <FileText className="w-4 h-4 text-[#DF3B68]" />
               <span>Rincian Informasi Tugas</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               {!selectedTemplateId ? (
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 bg-stone-50 hover:bg-stone-100 border border-stone-200 px-3 py-1.5 rounded-xl transition-colors select-none">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 dark:text-slate-300 bg-stone-50 dark:bg-[#1A2332] hover:bg-stone-100 dark:hover:bg-[#243044] border border-stone-200 dark:border-white/10 px-3 py-1.5 rounded-xl transition-colors select-none">
                   <input
                     type="checkbox"
                     checked={saveAsTemplate}
@@ -784,8 +812,8 @@ export default function NewTaskPage() {
                   <span>Simpan ke Master Katalog Tusi</span>
                 </label>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1 rounded-xl">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   Katalog Tusi Terpilih
                 </span>
               )}
@@ -795,7 +823,7 @@ export default function NewTaskPage() {
           <div className="space-y-4">
             {/* Klasifikasi Jenis Pekerjaan */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Tag className="w-3.5 h-3.5 text-[#DF3B68]" />
                 <span>Pilih Jenis Pekerjaan *</span>
               </label>
@@ -810,15 +838,15 @@ export default function NewTaskPage() {
                     onClick={() => setCategory(item.id as any)}
                     className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
                       category === item.id
-                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-stone-900 font-bold'
-                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                        ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-stone-900 dark:text-slate-100 font-bold'
+                        : 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#243044]'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span>{item.label}</span>
-                      <div className={`w-3.5 h-3.5 rounded-full border ${category === item.id ? 'border-[#DF3B68] bg-[#DF3B68]' : 'border-stone-300'}`} />
+                      <div className={`w-3.5 h-3.5 rounded-full border ${category === item.id ? 'border-[#DF3B68] bg-[#DF3B68]' : 'border-stone-300 dark:border-slate-600'}`} />
                     </div>
-                    <p className="text-[10px] text-stone-400 font-normal mt-0.5">{item.desc}</p>
+                    <p className="text-[10px] text-stone-400 dark:text-slate-500 font-normal mt-0.5">{item.desc}</p>
                   </div>
                 ))}
               </div>
@@ -832,7 +860,7 @@ export default function NewTaskPage() {
               required
             />
 
-            {/* INPUT MANUAL: DESKRIPSI SINGKAT PEKERJAAN */}
+            {/* DESKRIPSI SINGKAT PEKERJAAN */}
             <div className="space-y-1.5 text-left">
               <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
@@ -843,17 +871,17 @@ export default function NewTaskPage() {
                 placeholder="Contoh: Rekapitulasi atas Laporan Penertiban Ketidaksesuaian BMN atas Wasdal BMN Smt I 2026..."
                 value={shortDescription}
                 onChange={(e) => setShortDescription(e.target.value)}
-                className="w-full px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 leading-relaxed resize-none"
+                className="w-full px-3.5 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs text-stone-900 dark:text-slate-100 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 leading-relaxed resize-none"
               />
-              <p className="text-[11px] text-stone-400">
-                Teks ini yang akan langsung ditampilkan tepat di bawah judul tugas pada halaman daftar pekerjaan.
+              <p className="text-[11px] text-stone-400 dark:text-slate-500">
+                Teks ini akan langsung ditampilkan tepat di bawah judul tugas pada halaman daftar pekerjaan.
               </p>
             </div>
 
             {/* MULTI-DASAR HUKUM */}
-            <div className="p-4 bg-stone-50/70 rounded-2xl border border-stone-200 space-y-3">
+            <div className="p-4 bg-stone-50/70 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10 space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                <label className="text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
                   <BookOpen className="w-4 h-4 text-[#DF3B68]" />
                   <span>Dasar Hukum & Tautan Regulasi (Bisa Lebih Dari Satu)</span>
                 </label>
@@ -874,24 +902,24 @@ export default function NewTaskPage() {
                       placeholder="Nomor Regulasi (contoh: PER-28/PB/2019)"
                       value={reg.name}
                       onChange={(e) => handleRegulationChange(idx, 'name', e.target.value)}
-                      className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                      className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono text-stone-900 dark:text-slate-100"
                     />
                     <div className="flex items-center gap-1.5 w-full sm:w-1/2">
                       <div className="relative flex-1">
-                        <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <LinkIcon className="w-3.5 h-3.5 text-stone-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
                           type="url"
                           placeholder="https://jdih.kemenkeu.go.id/..."
                           value={reg.url}
                           onChange={(e) => handleRegulationChange(idx, 'url', e.target.value)}
-                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono text-stone-900 dark:text-slate-100"
                         />
                       </div>
                       {regulations.length > 1 && (
                         <button
                           type="button"
                           onClick={() => handleRemoveRegulation(idx)}
-                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
                           title="Hapus regulasi"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -904,28 +932,28 @@ export default function NewTaskPage() {
             </div>
 
             {/* MULTI-TOOLS & APLIKASI KERJA */}
-            <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-200/80 space-y-3">
+            <div className="p-4 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-200/80 dark:border-emerald-800/40 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                    <Wrench className="w-4 h-4 text-emerald-600" />
+                  <label className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                    <Wrench className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>Tools & Alat Kerja / Kertas Kerja (Label: Tools)</span>
                   </label>
-                  <p className="text-[11px] text-emerald-700/80 mt-0.5">
+                  <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-0.5">
                     Tautkan aplikasi kedinasan atau spreadsheet kerja (misal: E-Rekon&LK, Sakti, Kertas Kerja BLU).
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleAddTool}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-white px-2.5 py-1 rounded-lg border border-emerald-200 shadow-2xs"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 dark:hover:text-emerald-200 bg-white dark:bg-[#1A2332] px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800/60 shadow-2xs"
                 >
                   <Plus className="w-3.5 h-3.5" /> Tambah Tools
                 </button>
               </div>
 
               {tools.length === 0 ? (
-                <p className="text-xs text-stone-400 italic">Belum ada tools ditambahkan. Klik tombol di atas jika diperlukan.</p>
+                <p className="text-xs text-stone-400 dark:text-slate-500 italic">Belum ada tools ditambahkan. Klik tombol di atas jika diperlukan.</p>
               ) : (
                 <div className="space-y-2">
                   {tools.map((tool, idx) => (
@@ -935,23 +963,23 @@ export default function NewTaskPage() {
                         placeholder="Nama Alat / Aplikasi (contoh: Aplikasi E-Rekon&LK)"
                         value={tool.name}
                         onChange={(e) => handleToolChange(idx, 'name', e.target.value)}
-                        className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-semibold"
+                        className="w-full sm:w-1/2 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-900 dark:text-slate-100"
                       />
                       <div className="flex items-center gap-1.5 w-full sm:w-1/2">
                         <div className="relative flex-1">
-                          <LinkIcon className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <LinkIcon className="w-3.5 h-3.5 text-stone-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                           <input
                             type="url"
                             placeholder="https://erekon-lk.kemenkeu.go.id/..."
                             value={tool.url}
                             onChange={(e) => handleToolChange(idx, 'url', e.target.value)}
-                            className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                            className="w-full pl-8 pr-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono text-stone-900 dark:text-slate-100"
                           />
                         </div>
                         <button
                           type="button"
                           onClick={() => handleRemoveTool(idx)}
-                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                          className="p-2 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
                           title="Hapus tools"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -963,9 +991,9 @@ export default function NewTaskPage() {
               )}
             </div>
 
-            {/* EDITOR DESKRIPSI H1 & DAFTAR ISI */}
+            {/* EDITOR DESKRIPSI H1 */}
             <div className="space-y-1.5 text-left">
-              <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-[#DF3B68]" />
                 <span>Petunjuk Teknis Lengkap & Detail (Gunakan Tombol H1 / + Seksi Bab untuk membuat Bab Daftar Isi)</span>
               </label>
@@ -978,14 +1006,14 @@ export default function NewTaskPage() {
           </div>
 
           {/* SIKLUS & TENGGAT WAKTU FLEKSIBEL */}
-          <div className="bg-stone-50/80 p-5 rounded-2xl border border-stone-200/80 space-y-4">
-            <div className="p-3.5 bg-white rounded-xl border border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="bg-stone-50/80 dark:bg-[#0E1520] p-5 rounded-2xl border border-stone-200/80 dark:border-white/10 space-y-4">
+            <div className="p-3.5 bg-white dark:bg-[#131B26] rounded-xl border border-stone-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800 dark:text-slate-100">
                   <RotateCw className="w-3.5 h-3.5 text-[#DF3B68]" />
                   <span>Sifat Tugas & Otomasi Periode (Klerikal vs Non-Klerikal)</span>
                 </div>
-                <p className="text-[11px] text-stone-500 mt-0.5">
+                <p className="text-[11px] text-stone-500 dark:text-slate-400 mt-0.5">
                   Tugas klerikal rutin akan digenerate otomatis oleh cron setiap awal siklus.
                 </p>
               </div>
@@ -998,7 +1026,7 @@ export default function NewTaskPage() {
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                     isClericalRecurring && periodType !== 'INSIDENTIL'
                       ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200 disabled:opacity-40'
+                      : 'bg-stone-100 dark:bg-[#1A2332] text-stone-600 dark:text-slate-400 hover:bg-stone-200 dark:hover:bg-[#243044] disabled:opacity-40'
                   }`}
                 >
                   <span>🤖 Klerikal (Auto-Generate)</span>
@@ -1009,8 +1037,8 @@ export default function NewTaskPage() {
                   onClick={() => setIsClericalRecurring(false)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                     !isClericalRecurring || periodType === 'INSIDENTIL'
-                      ? 'bg-stone-800 text-white shadow-xs'
-                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      ? 'bg-stone-800 dark:bg-slate-700 text-white shadow-xs'
+                      : 'bg-stone-100 dark:bg-[#1A2332] text-stone-600 dark:text-slate-400 hover:bg-stone-200 dark:hover:bg-[#243044]'
                   }`}
                 >
                   <span>✋ Non-Klerikal (Manual)</span>
@@ -1020,11 +1048,11 @@ export default function NewTaskPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-stone-700 mb-1">Jenis Siklus Pekerjaan *</label>
+                <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Jenis Siklus Pekerjaan *</label>
                 <select
                   value={periodType}
                   onChange={(e) => setPeriodType(e.target.value as any)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-800 dark:text-slate-200"
                 >
                   <option value="TRIWULANAN">Triwulanan (TW I s.d. TW IV)</option>
                   <option value="BULANAN">Bulanan (Rutin)</option>
@@ -1036,11 +1064,11 @@ export default function NewTaskPage() {
 
               {periodType === 'TRIWULANAN' && (
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Triwulan Tugas *</label>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Pilih Triwulan Tugas *</label>
                   <select
                     value={selectedQuarter}
                     onChange={(e) => setSelectedQuarter(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-800 dark:text-slate-200"
                   >
                     <option value={1}>Triwulan I (Januari - Maret)</option>
                     <option value={2}>Triwulan II (April - Juni)</option>
@@ -1052,11 +1080,11 @@ export default function NewTaskPage() {
 
               {periodType === 'SEMESTERAN' && (
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Semester Tugas *</label>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Pilih Semester Tugas *</label>
                   <select
                     value={selectedSemester}
                     onChange={(e) => setSelectedSemester(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-800 dark:text-slate-200"
                   >
                     <option value={1}>Semester I (Januari - Juni)</option>
                     <option value={2}>Semester II (Juli - Desember)</option>
@@ -1066,11 +1094,11 @@ export default function NewTaskPage() {
 
               {periodType === 'BULANAN' && (
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Pilih Bulan Tugas *</label>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Pilih Bulan Tugas *</label>
                   <select
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-800 dark:text-slate-200"
                   >
                     {monthNames.map((m, idx) => (
                       <option key={idx + 1} value={idx + 1}>
@@ -1083,43 +1111,45 @@ export default function NewTaskPage() {
 
               {periodType !== 'INSIDENTIL' ? (
                 <div>
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Tahun Anggaran *</label>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Tahun Anggaran *</label>
                   <input
                     type="number"
                     value={selectedYear}
                     onChange={(e) => setSelectedYear(Number(e.target.value))}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-semibold text-stone-800"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-semibold text-stone-800 dark:text-slate-200"
                   />
                 </div>
               ) : (
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-stone-700 mb-1">Tenggat Waktu Pekerjaan *</label>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">Tenggat Waktu Pekerjaan *</label>
                   <input
                     type="date"
                     value={deadline}
                     onChange={(e) => setDeadline(e.target.value)}
                     required
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs font-mono font-medium"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono font-medium text-stone-900 dark:text-slate-100"
                   />
                 </div>
               )}
             </div>
 
-            {/* Pilihan Fleksibilitas Tenggat Lintas Bulan & Bulan Berkenaan */}
+            {/* Penetapan Tenggat Waktu */}
             {periodType !== 'INSIDENTIL' && (
-              <div className="pt-3 border-t border-stone-200/60 space-y-3">
+              <div className="pt-3 border-t border-stone-200/60 dark:border-white/10 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-[#DF3B68]" />
-                    <span className="text-xs font-bold text-stone-800">Mode Penetapan Tenggat Waktu:</span>
+                    <span className="text-xs font-bold text-stone-800 dark:text-slate-200">Mode Penetapan Tenggat Waktu:</span>
                   </div>
 
-                  <div className="flex items-center bg-stone-200/60 p-1 rounded-xl text-xs">
+                  <div className="flex items-center bg-stone-200/60 dark:bg-[#1A2332] p-1 rounded-xl text-xs">
                     <button
                       type="button"
                       onClick={() => setDeadlineMode('FORMULA')}
                       className={`px-3 py-1 rounded-lg font-semibold transition-all ${
-                        deadlineMode === 'FORMULA' ? 'bg-white text-stone-900 shadow-xs' : 'text-stone-600 hover:text-stone-900'
+                        deadlineMode === 'FORMULA' 
+                          ? 'bg-white dark:bg-[#243044] text-stone-900 dark:text-slate-100 shadow-xs' 
+                          : 'text-stone-600 dark:text-slate-400 hover:text-stone-900 dark:hover:text-slate-100'
                       }`}
                     >
                       Otomatis Rumus (M+1 / Bulan Berkenaan)
@@ -1128,7 +1158,7 @@ export default function NewTaskPage() {
                       type="button"
                       onClick={() => setDeadlineMode('CUSTOM')}
                       className={`px-3 py-1 rounded-lg font-semibold transition-all ${
-                        deadlineMode === 'CUSTOM' ? 'bg-[#DF3B68] text-white shadow-xs' : 'text-stone-600 hover:text-[#DF3B68]'
+                        deadlineMode === 'CUSTOM' ? 'bg-[#DF3B68] text-white shadow-xs' : 'text-stone-600 dark:text-slate-400 hover:text-[#DF3B68]'
                       }`}
                     >
                       Kustom Bebas
@@ -1139,11 +1169,11 @@ export default function NewTaskPage() {
                 {deadlineMode === 'FORMULA' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                     <div className="space-y-2">
-                      <label className="block text-[11px] font-medium text-stone-600 mb-1">1. Posisi Bulan Batas:</label>
+                      <label className="block text-[11px] font-medium text-stone-600 dark:text-slate-400 mb-1">1. Posisi Bulan Batas:</label>
                       <select
                         value={deadlineRule}
                         onChange={(e) => setDeadlineRule(e.target.value as any)}
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-medium"
+                        className="w-full px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-medium text-stone-800 dark:text-slate-200"
                       >
                         <option value="CURRENT_MONTH_CUSTOM">Bulan Berkenaan (Pilih Bulan Tertentu)</option>
                         <option value="NEXT_MONTH_DATE">Bulan Berikutnya Setelah Periode Berakhir (M+1)</option>
@@ -1151,16 +1181,15 @@ export default function NewTaskPage() {
                         <option value="SAME_MONTH_DATE">Bulan Pertama / Awal Periode</option>
                       </select>
 
-                      {/* Dropdown Spesifik Bulan Berkenaan jika dipilih */}
                       {deadlineRule === 'CURRENT_MONTH_CUSTOM' && periodType !== 'BULANAN' && (
-                        <div className="p-2.5 bg-rose-50/50 rounded-xl border border-rose-200/80 space-y-1">
-                          <label className="block text-[10px] font-bold text-rose-800">
+                        <div className="p-2.5 bg-rose-50/50 dark:bg-rose-950/20 rounded-xl border border-rose-200/80 dark:border-rose-900/40 space-y-1">
+                          <label className="block text-[10px] font-bold text-rose-800 dark:text-rose-300">
                             Pilih Bulan Berkenaan dalam Siklus:
                           </label>
                           <select
                             value={customPeriodMonthIndex}
                             onChange={(e) => setCustomPeriodMonthIndex(Number(e.target.value))}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-rose-300 bg-white text-xs font-semibold text-rose-900"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-[#1A2332] text-xs font-semibold text-rose-900 dark:text-rose-200"
                           >
                             {getPeriodMonthOptions().map((opt) => (
                               <option key={opt.index} value={opt.index}>
@@ -1173,7 +1202,7 @@ export default function NewTaskPage() {
                     </div>
 
                     <div>
-                      <label className="block text-[11px] font-medium text-stone-600 mb-1">2. Penetapan Tanggal:</label>
+                      <label className="block text-[11px] font-medium text-stone-600 dark:text-slate-400 mb-1">2. Penetapan Tanggal:</label>
                       <div className="flex gap-2">
                         <select
                           value={exactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(exactDay) ? String(exactDay) : 'CUSTOM'}
@@ -1187,7 +1216,7 @@ export default function NewTaskPage() {
                               setCustomDayInput(String(val));
                             }
                           }}
-                          className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 bg-white text-xs"
+                          className="w-1/2 px-2.5 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs text-stone-800 dark:text-slate-200"
                         >
                           <option value="31">Akhir Bulan (Max)</option>
                           <option value="5">Tanggal 5</option>
@@ -1209,15 +1238,14 @@ export default function NewTaskPage() {
                             const val = Number(e.target.value);
                             if (val >= 1 && val <= 31) setExactDay(val);
                           }}
-                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono text-center font-bold"
-                          title="Ketik tanggal manual 1 - 31"
+                          className="w-1/2 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono text-center font-bold text-stone-900 dark:text-slate-100"
                         />
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="p-3 bg-white rounded-xl border border-stone-200 space-y-2">
-                    <label className="block text-xs font-semibold text-stone-700">
+                  <div className="p-3 bg-white dark:bg-[#131B26] rounded-xl border border-stone-200 dark:border-white/10 space-y-2">
+                    <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300">
                       Tentukan Tanggal Jatuh Tempo Bebas:
                     </label>
                     <input
@@ -1225,23 +1253,96 @@ export default function NewTaskPage() {
                       value={deadline}
                       onChange={(e) => setDeadline(e.target.value)}
                       required
-                      className="w-full sm:w-64 px-3 py-2 rounded-xl border border-stone-200 bg-stone-50 text-xs font-mono font-medium focus:ring-2 focus:ring-[#DF3B68]/20"
+                      className="w-full sm:w-64 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-xs font-mono font-medium text-stone-900 dark:text-slate-100 focus:ring-2 focus:ring-[#DF3B68]/20"
                     />
                   </div>
                 )}
 
-                <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl text-emerald-800 text-xs font-bold">
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                <div className="inline-flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1 rounded-xl text-emerald-800 dark:text-emerald-300 text-xs font-bold">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                   <span>Tenggat Akhir Ditetapkan: {deadline || '-'}</span>
                 </div>
               </div>
             )}
+
+            {/* WIDGET TARGET NILAI MAKSIMAL (H-X) */}
+            <div className="p-4 bg-amber-50/70 dark:bg-amber-950/20 rounded-2xl border border-amber-200/80 dark:border-amber-800/40 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <div>
+                    <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                      Batas Waktu Nilai Maksimal (Target Kinerja Optimal H-X)
+                    </span>
+                    <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+                      Syarat capaian nilai IKU maksimal jika pekerjaan diselesaikan sebelum batas regulasi.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={enableMaxScore}
+                    onChange={(e) => setEnableMaxScore(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-amber-900 dark:text-amber-200">Aktifkan Target H-X</span>
+                </label>
+              </div>
+
+              {enableMaxScore && (
+                <div className="space-y-2 pt-2 border-t border-amber-200/60 dark:border-amber-800/40">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">Pilih Selisih Hari:</span>
+                    {[1, 2, 3, 5, 7].map((days) => (
+                      <button
+                        type="button"
+                        key={days}
+                        onClick={() => setMaxScoreDaysBefore(days)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          maxScoreDaysBefore === days
+                            ? 'bg-amber-500 text-white shadow-xs'
+                            : 'bg-white dark:bg-[#1A2332] border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-[#243044]'
+                        }`}
+                      >
+                        H-{days}
+                      </button>
+                    ))}
+
+                    <div className="flex items-center gap-1 ml-auto">
+                      <span className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">Kustom:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={maxScoreDaysBefore}
+                        onChange={(e) => setMaxScoreDaysBefore(Number(e.target.value))}
+                        className="w-14 px-2 py-1 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-[#1A2332] text-xs font-bold text-center text-amber-900 dark:text-amber-200"
+                      />
+                      <span className="text-xs text-amber-700 dark:text-amber-400">hari kalender</span>
+                    </div>
+                  </div>
+
+                  {maxScoreDeadline && (
+                    <div className="p-2.5 bg-white dark:bg-[#131B26] rounded-xl border border-amber-200/80 dark:border-amber-800/50 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="text-amber-900 dark:text-amber-300 font-semibold flex items-center gap-1.5">
+                        ⭐ <strong>Target Nilai Maksimal:</strong> {maxScoreDeadline} (H-{maxScoreDaysBefore})
+                      </span>
+                      <span className="text-stone-500 dark:text-slate-400 text-[11px]">
+                        Batas Resmi: {deadline || '-'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Konfigurasi Ambang Masa Kritis & Prioritas */}
+          {/* Konfigurasi Peringatan Masa Kritis & Prioritas */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
-              <label className="block text-xs font-bold text-stone-800 flex items-center gap-1.5">
+            <div className="p-4 bg-stone-50 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10 space-y-2">
+              <label className="block text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
                 <BellRing className="w-4 h-4 text-[#DF3B68]" />
                 <span>Peringatan Masa Kritis & WhatsApp (H-X) *</span>
               </label>
@@ -1254,7 +1355,7 @@ export default function NewTaskPage() {
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                       criticalDaysThreshold === days
                         ? 'bg-[#DF3B68] text-white shadow-xs'
-                        : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
+                        : 'bg-white dark:bg-[#1A2332] border border-stone-200 dark:border-white/10 text-stone-700 dark:text-slate-300 hover:bg-stone-100 dark:hover:bg-[#243044]'
                     }`}
                   >
                     H-{days}
@@ -1262,27 +1363,27 @@ export default function NewTaskPage() {
                 ))}
 
                 <div className="flex items-center gap-1 ml-auto">
-                  <span className="text-xs text-stone-500 font-medium">Kustom:</span>
+                  <span className="text-xs text-stone-500 dark:text-slate-400 font-medium">Kustom:</span>
                   <input
                     type="number"
                     min={1}
                     max={60}
                     value={criticalDaysThreshold}
                     onChange={(e) => setCriticalDaysThreshold(Number(e.target.value))}
-                    className="w-16 px-2 py-1 rounded-lg border border-stone-200 bg-white text-xs font-bold text-center text-rose-700"
+                    className="w-16 px-2 py-1 rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-bold text-center text-rose-700 dark:text-rose-400"
                   />
-                  <span className="text-xs text-stone-400">hari</span>
+                  <span className="text-xs text-stone-400 dark:text-slate-500">hari</span>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
-              <label className="block text-xs font-bold text-stone-800">Tingkat Prioritas Tugas</label>
+            <div className="p-4 bg-stone-50 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10 space-y-2">
+              <label className="block text-xs font-bold text-stone-800 dark:text-slate-200">Tingkat Prioritas Tugas</label>
               <div className="flex gap-2 pt-1">
                 {[
-                  { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-200 peer-checked:text-stone-800' },
-                  { id: 'SEDANG', label: 'Sedang', style: 'peer-checked:bg-amber-100 peer-checked:text-amber-800 peer-checked:border-amber-300' },
-                  { id: 'TINGGI', label: 'Tinggi', style: 'peer-checked:bg-rose-100 peer-checked:text-rose-800 peer-checked:border-rose-300' },
+                  { id: 'RENDAH', label: 'Rendah', style: 'peer-checked:bg-stone-200 dark:peer-checked:bg-slate-700 peer-checked:text-stone-800 dark:peer-checked:text-slate-100' },
+                  { id: 'SEDANG', label: 'Sedang', style: 'peer-checked:bg-amber-100 dark:peer-checked:bg-amber-950/60 peer-checked:text-amber-800 dark:peer-checked:text-amber-300 peer-checked:border-amber-300 dark:peer-checked:border-amber-700/60' },
+                  { id: 'TINGGI', label: 'Tinggi', style: 'peer-checked:bg-rose-100 dark:peer-checked:bg-rose-950/60 peer-checked:text-rose-800 dark:peer-checked:text-rose-300 peer-checked:border-rose-300 dark:peer-checked:border-rose-700/60' },
                 ].map((p) => (
                   <label key={p.id} className="cursor-pointer flex-1">
                     <input
@@ -1293,7 +1394,7 @@ export default function NewTaskPage() {
                       onChange={() => setPriority(p.id as any)}
                       className="peer sr-only"
                     />
-                    <div className={`p-2 text-center text-xs font-semibold rounded-xl border border-stone-200 bg-white text-stone-500 transition-all ${p.style}`}>
+                    <div className={`p-2 text-center text-xs font-semibold rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-500 dark:text-slate-400 transition-all ${p.style}`}>
                       {p.label}
                     </div>
                   </label>
@@ -1304,21 +1405,21 @@ export default function NewTaskPage() {
         </div>
 
         {/* PIC PELAKSANA UTAMA */}
-        <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
-            <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+        <div className="bg-white dark:bg-[#131B26] rounded-3xl p-6 md:p-8 border border-stone-200/70 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 dark:border-white/5 pb-3">
+            <div className="flex items-center gap-2 text-stone-800 dark:text-slate-100 font-bold text-sm">
               <Users className="w-4 h-4 text-[#DF3B68]" />
               <span>Tetapkan PIC Pelaksana Utama</span>
             </div>
 
-            <div className="flex items-center bg-stone-100 p-1 rounded-2xl border border-stone-200">
+            <div className="flex items-center bg-stone-100 dark:bg-[#1A2332] p-1 rounded-2xl border border-stone-200 dark:border-white/10">
               <button
                 type="button"
                 onClick={() => setAssignmentMode('MANUAL')}
                 className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all ${
                   assignmentMode === 'MANUAL'
-                    ? 'bg-white text-stone-900 shadow-xs'
-                    : 'text-stone-500 hover:text-stone-900'
+                    ? 'bg-white dark:bg-[#243044] text-stone-900 dark:text-slate-100 shadow-xs'
+                    : 'text-stone-500 dark:text-slate-400 hover:text-stone-900 dark:hover:text-slate-100'
                 }`}
               >
                 Penugasan Manual
@@ -1329,7 +1430,7 @@ export default function NewTaskPage() {
                 className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                   assignmentMode === 'BROADCAST'
                     ? 'bg-[#DF3B68] text-white shadow-xs'
-                    : 'text-stone-600 hover:text-[#DF3B68]'
+                    : 'text-stone-600 dark:text-slate-400 hover:text-[#DF3B68]'
                 }`}
               >
                 <Radio className="w-3.5 h-3.5" />
@@ -1340,9 +1441,9 @@ export default function NewTaskPage() {
 
           {assignmentMode === 'MANUAL' && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs text-stone-500">
+              <div className="flex items-center justify-between text-xs text-stone-500 dark:text-slate-400">
                 <span>Pilih satu atau beberapa pegawai pelaksana:</span>
-                <span className="font-semibold text-stone-700">{selectedPics.length} pegawai dipilih</span>
+                <span className="font-semibold text-stone-700 dark:text-slate-200">{selectedPics.length} pegawai dipilih</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-1">
@@ -1354,15 +1455,15 @@ export default function NewTaskPage() {
                       onClick={() => togglePic(staff.id)}
                       className={`p-3 rounded-2xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
                         isChecked
-                          ? 'border-[#DF3B68]/40 bg-rose-50/40 text-stone-900'
-                          : 'border-stone-200/80 bg-white text-stone-600 hover:bg-stone-50'
+                          ? 'border-[#DF3B68]/40 dark:border-rose-500/40 bg-rose-50/40 dark:bg-rose-950/20 text-stone-900 dark:text-slate-100'
+                          : 'border-stone-200/80 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#243044]'
                       }`}
                     >
                       <div className="truncate pr-2">
                         <p className="font-semibold truncate">{staff.full_name}</p>
-                        <p className="text-[10px] text-stone-400">NIP. {staff.nip} • {staff.role}</p>
+                        <p className="text-[10px] text-stone-400 dark:text-slate-500">NIP. {staff.nip} • {staff.role}</p>
                       </div>
-                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300'}`}>
+                      <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isChecked ? 'bg-[#DF3B68] border-[#DF3B68] text-white' : 'border-stone-300 dark:border-slate-600'}`}>
                         {isChecked && <CheckCircle2 className="w-3 h-3" />}
                       </div>
                     </div>
@@ -1373,14 +1474,14 @@ export default function NewTaskPage() {
           )}
 
           {assignmentMode === 'BROADCAST' && (
-            <div className="space-y-4 bg-stone-50/70 p-4 sm:p-5 rounded-2xl border border-stone-200">
+            <div className="space-y-4 bg-stone-50/70 dark:bg-[#0E1520] p-4 sm:p-5 rounded-2xl border border-stone-200 dark:border-white/10">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                  <label className="text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
                     <Building className="w-4 h-4 text-[#DF3B68]" />
                     <span>Pilih Lingkup Instansi Target Broadcast:</span>
                   </label>
-                  <span className="text-[11px] font-semibold text-stone-500">
+                  <span className="text-[11px] font-semibold text-stone-500 dark:text-slate-400">
                     Total: {broadcastStaffList.length} Pegawai
                   </span>
                 </div>
@@ -1392,7 +1493,7 @@ export default function NewTaskPage() {
                     className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
                       broadcastScope === 'SEKSI'
                         ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
-                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                        : 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#243044]'
                     }`}
                   >
                     🏢 Satu Seksi ({userTusiType})
@@ -1404,7 +1505,7 @@ export default function NewTaskPage() {
                     className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
                       broadcastScope === 'KANTOR'
                         ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
-                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                        : 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#243044]'
                     }`}
                   >
                     🏛️ Satu Kantor (Seluruh Seksi KPPN)
@@ -1416,7 +1517,7 @@ export default function NewTaskPage() {
                     className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition-all ${
                       broadcastScope === 'WILAYAH'
                         ? 'border-[#DF3B68] bg-[#DF3B68]/10 text-[#DF3B68]'
-                        : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'
+                        : 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#243044]'
                     }`}
                   >
                     🌐 Seluruh Wilayah (Semua KPPN & Kanwil)
@@ -1424,42 +1525,42 @@ export default function NewTaskPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-stone-200 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white dark:bg-[#131B26] rounded-xl border border-stone-200 dark:border-white/10 text-xs">
                 <div className="flex items-center gap-2">
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                  <span>
-                    Penerima: <strong className="text-emerald-700 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
+                  <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-stone-700 dark:text-slate-300">
+                    Penerima: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{broadcastStaffList.length - excludedPicIds.length}</strong> pegawai
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <UserX className="w-4 h-4 text-rose-500" />
-                  <span>
-                    Dikecualikan: <strong className="text-rose-600 font-bold">{excludedPicIds.length}</strong> pegawai
+                  <span className="text-stone-700 dark:text-slate-300">
+                    Dikecualikan: <strong className="text-rose-600 dark:text-rose-400 font-bold">{excludedPicIds.length}</strong> pegawai
                   </span>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                  <p className="text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
                     <UserX className="w-3.5 h-3.5 text-rose-500" />
                     <span>Daftar Pengecualian Pegawai:</span>
                   </p>
                   
                   <div className="relative w-full sm:w-64">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400 dark:text-slate-500" />
                     <input
                       type="text"
                       placeholder="Cari nama / NIP untuk dikecualikan..."
                       value={exclusionSearch}
                       onChange={(e) => setExclusionSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white rounded-xl border border-stone-200 focus:outline-none focus:ring-1 focus:ring-[#DF3B68]"
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-[#1A2332] rounded-xl border border-stone-200 dark:border-white/10 text-stone-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-[#DF3B68]"
                     />
                   </div>
                 </div>
 
                 {loadingBroadcastStaff ? (
-                  <div className="py-6 text-center text-xs text-stone-400">Memuat data pegawai...</div>
+                  <div className="py-6 text-center text-xs text-stone-400 dark:text-slate-500">Memuat data pegawai...</div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
                     {filteredBroadcastStaff.map((staff) => {
@@ -1470,30 +1571,30 @@ export default function NewTaskPage() {
                           onClick={() => toggleExclusion(staff.id)}
                           className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-all ${
                             isExcluded
-                              ? 'border-rose-300 bg-rose-50/60 text-stone-400'
-                              : 'border-stone-200 bg-white text-stone-800 hover:bg-stone-50'
+                              ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/60 dark:bg-rose-950/20 text-stone-400 dark:text-slate-500'
+                              : 'border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 hover:bg-stone-50 dark:hover:bg-[#243044]'
                           }`}
                         >
                           <div className="truncate pr-2">
-                            <p className={`font-semibold truncate ${isExcluded ? 'line-through text-stone-400' : 'text-stone-900'}`}>
+                            <p className={`font-semibold truncate ${isExcluded ? 'line-through text-stone-400 dark:text-slate-500' : 'text-stone-900 dark:text-slate-100'}`}>
                               {staff.full_name}
                             </p>
-                            <p className="text-[10px] text-stone-400">
+                            <p className="text-[10px] text-stone-400 dark:text-slate-500">
                               {staff.role} • {staff.unit?.name || 'Unit'}
                             </p>
                           </div>
 
                           <div className="flex items-center gap-1.5">
                             {isExcluded ? (
-                              <span className="text-[10px] font-bold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-200">
+                              <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-200 dark:border-rose-900/40">
                                 Dikecualikan
                               </span>
                             ) : (
-                              <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                              <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/40">
                                 Menerima
                               </span>
                             )}
-                            <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'border-stone-300'}`}>
+                            <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${isExcluded ? 'bg-rose-500 border-rose-500 text-white' : 'border-stone-300 dark:border-slate-600'}`}>
                               {isExcluded && <CheckCircle2 className="w-3 h-3" />}
                             </div>
                           </div>
@@ -1507,15 +1608,15 @@ export default function NewTaskPage() {
           )}
         </div>
 
-        {/* SUBTASKS: DENGAN REORDER (▲ / ▼) & PEMILIHAN PIC OPSIONAL */}
-        <div className="bg-white rounded-3xl p-6 md:p-8 border border-stone-200/70 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+        {/* SUBTASKS: REORDER & PIC OPSIONAL */}
+        <div className="bg-white dark:bg-[#131B26] rounded-3xl p-6 md:p-8 border border-stone-200/70 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/5 pb-3">
             <div>
-              <div className="flex items-center gap-2 text-stone-800 font-bold text-sm">
+              <div className="flex items-center gap-2 text-stone-800 dark:text-slate-100 font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4 text-[#DF3B68]" />
                 <span>Tahapan Sub-Pekerjaan, Urutan & PIC Pelaksana</span>
               </div>
-              <p className="text-[11px] text-stone-400 mt-0.5">
+              <p className="text-[11px] text-stone-400 dark:text-slate-500 mt-0.5">
                 Gunakan tombol panah Naik (▲) / Turun (▼) untuk mengatur alur urutan tahapan secara fleksibel.
               </p>
             </div>
@@ -1530,15 +1631,15 @@ export default function NewTaskPage() {
 
           <div className="space-y-2.5">
             {subtasks.map((st, idx) => (
-              <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 bg-stone-50/70 rounded-2xl border border-stone-200">
-                {/* Tombol Reorder Naik & Turun */}
+              <div key={idx} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 bg-stone-50/70 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10">
+                {/* Tombol Reorder */}
                 <div className="flex items-center gap-1 self-start sm:self-auto">
                   <div className="flex flex-col">
                     <button
                       type="button"
                       disabled={idx === 0}
                       onClick={() => handleMoveSubtask(idx, 'UP')}
-                      className="p-1 text-stone-500 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white rounded transition-colors"
+                      className="p-1 text-stone-500 dark:text-slate-400 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white dark:hover:bg-[#1A2332] rounded transition-colors"
                       title="Geser ke atas"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
@@ -1547,13 +1648,13 @@ export default function NewTaskPage() {
                       type="button"
                       disabled={idx === subtasks.length - 1}
                       onClick={() => handleMoveSubtask(idx, 'DOWN')}
-                      className="p-1 text-stone-500 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white rounded transition-colors"
+                      className="p-1 text-stone-500 dark:text-slate-400 hover:text-[#DF3B68] disabled:opacity-20 hover:bg-white dark:hover:bg-[#1A2332] rounded transition-colors"
                       title="Geser ke bawah"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <span className="text-xs font-bold text-stone-600 w-5 text-center">{idx + 1}.</span>
+                  <span className="text-xs font-bold text-stone-600 dark:text-slate-400 w-5 text-center">{idx + 1}.</span>
                 </div>
 
                 <input
@@ -1561,7 +1662,7 @@ export default function NewTaskPage() {
                   placeholder={`Uraian sub-tahapan ke-${idx + 1}...`}
                   value={st.title}
                   onChange={(e) => handleSubtaskTitleChange(idx, e.target.value)}
-                  className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="flex-1 px-3.5 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs text-stone-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
 
                 {/* Dropdown PIC Tahapan */}
@@ -1569,7 +1670,7 @@ export default function NewTaskPage() {
                   <select
                     value={st.pic_id || ''}
                     onChange={(e) => handleSubtaskPicChange(idx, e.target.value)}
-                    className="w-full sm:w-44 px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                    className="w-full sm:w-44 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-medium text-stone-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                   >
                     <option value="">-- Tanpa PIC (Kosong) --</option>
                     {staffList.map((staff) => (
@@ -1581,19 +1682,19 @@ export default function NewTaskPage() {
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-stone-500 whitespace-nowrap">Batas:</span>
+                  <span className="text-[11px] text-stone-500 dark:text-slate-400 whitespace-nowrap">Batas:</span>
                   <input
                     type="date"
                     max={deadline || undefined}
                     value={st.deadline || ''}
                     onChange={(e) => handleSubtaskDeadlineChange(idx, e.target.value)}
-                    className="px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white text-xs font-mono"
+                    className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-white/10 bg-white dark:bg-[#1A2332] text-xs font-mono text-stone-900 dark:text-slate-100"
                   />
                   {subtasks.length > 1 && (
                     <button
                       type="button"
                       onClick={() => handleRemoveSubtask(idx)}
-                      className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50"
+                      className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40"
                       title="Hapus tahapan"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -1609,7 +1710,7 @@ export default function NewTaskPage() {
         <div className="flex items-center justify-end gap-3 pt-2">
           <Link
             href="/tasks"
-            className="px-5 py-2.5 rounded-full border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-medium"
+            className="px-5 py-2.5 rounded-full border border-stone-200 dark:border-white/10 text-stone-600 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-[#1A2332] text-xs font-medium transition-colors"
           >
             Batal
           </Link>
