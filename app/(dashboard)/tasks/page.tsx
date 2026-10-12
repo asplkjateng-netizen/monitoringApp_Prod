@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -23,9 +23,12 @@ import {
   Wrench, 
   ListCollapse,
   User,
-  History
+  History,
+  Download
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { SectionMatrixExport } from '@/components/tasks/section-matrix-export';
+import { toPng } from 'html-to-image';
 
 interface LinkItem {
   name: string;
@@ -175,7 +178,7 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
   if (sections.length <= 1 && sections[0]?.title === 'Rincian Petunjuk Teknis') {
     return (
-      <div className="p-3.5 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/80 dark:border-slate-700 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
+      <div className="p-3.5 bg-white dark:bg-[#1E1E1E] rounded-2xl border border-stone-200/80 dark:border-white/[0.08] text-xs text-stone-700 dark:text-white/80 leading-relaxed">
         {rawContent.includes('<') && rawContent.includes('>') ? (
           <div dangerouslySetInnerHTML={{ __html: rawContent }} />
         ) : (
@@ -189,13 +192,13 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
   return (
     <div className="space-y-2.5">
-      <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-stone-200/90 dark:border-slate-700 shadow-2xs">
-        <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700/60 text-xs">
-          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
+      <div className="p-3 bg-white dark:bg-[#1E1E1E] rounded-2xl border border-stone-200/90 dark:border-white/[0.08] shadow-2xs">
+        <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-white/[0.06] text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-white/90">
             <ListCollapse className="w-3.5 h-3.5 text-[#DF3B68]" />
             <span>Daftar Isi Petunjuk Teknis ({sections.length} Bab)</span>
           </div>
-          <span className="text-[11px] text-stone-400">
+          <span className="text-[11px] text-stone-400 dark:text-white/40">
             {activeSectionId ? 'Klik bab aktif untuk menutup' : 'Klik salah satu bab untuk membuka isi'}
           </span>
         </div>
@@ -211,10 +214,10 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-2xs ${
                   isActive
                     ? 'bg-[#DF3B68] text-white font-bold ring-2 ring-[#DF3B68]/30 shadow-xs'
-                    : 'bg-stone-50 dark:bg-slate-700/60 text-stone-700 dark:text-slate-200 hover:bg-stone-100 dark:hover:bg-slate-700 border border-stone-200/70 dark:border-slate-700'
+                    : 'bg-stone-50 dark:bg-[#242424] text-stone-700 dark:text-white/70 hover:bg-stone-100 dark:hover:bg-[#2C2C2C] border border-stone-200/70 dark:border-white/[0.08]'
                 }`}
               >
-                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400'}`}>{idx + 1}.</span>
+                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400 dark:text-white/40'}`}>{idx + 1}.</span>
                 <span>{sec.title}</span>
                 <span className="text-[10px] ml-0.5 opacity-80">{isActive ? '▲' : '▼'}</span>
               </button>
@@ -224,21 +227,21 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
       </div>
 
       {activeSection && (
-        <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
-          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-slate-700">
-            <p className="font-extrabold text-[#DF3B68] text-xs uppercase tracking-wide flex items-center gap-1.5">
+        <div className="p-4 bg-white dark:bg-[#242424] rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
+          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-white/[0.06]">
+            <p className="font-extrabold text-[#DF3B68] dark:text-rose-400 text-xs uppercase tracking-wide flex items-center gap-1.5">
               <span>📖 {activeSection.title}</span>
             </p>
             <button
               type="button"
               onClick={() => setActiveSectionId(null)}
-              className="text-[11px] text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 underline"
+              className="text-[11px] text-stone-400 dark:text-white/40 hover:text-stone-700 dark:hover:text-white underline"
             >
               Tutup Uraian
             </button>
           </div>
 
-          <div className="text-xs text-stone-800 dark:text-slate-200 leading-relaxed pt-1">
+          <div className="text-xs text-stone-800 dark:text-white/80 leading-relaxed pt-1">
             {activeSection.content.includes('<') && activeSection.content.includes('>') ? (
               <div 
                 className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
@@ -276,6 +279,11 @@ function TasksContent() {
   const [unitList, setUnitList] = useState<UnitOption[]>([]);
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL_UNITS');
   const [userUnitId, setUserUnitId] = useState<string>('');
+  const [userUnitName, setUserUnitName] = useState<string>('Seksi ASPLK');
+
+  // State Ekspor Matriks PNG Seluruh Tugas
+  const [exportingMatrix, setExportingMatrix] = useState(false);
+  const matrixExportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (searchParams.get('status')) {
@@ -302,7 +310,7 @@ function TasksContent() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('unit_id, role')
+        .select('unit_id, role, unit:units(id, name, level)')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -312,6 +320,9 @@ function TasksContent() {
       if (profile) {
         currentUnitId = profile.unit_id || '';
         setUserUnitId(currentUnitId);
+        if (profile.unit) {
+          setUserUnitName((profile.unit as any).name || 'Unit Kerja');
+        }
         adminFlag = String(profile.role).toUpperCase() === 'SUPER_ADMIN';
         setIsSuperAdmin(adminFlag);
 
@@ -508,7 +519,31 @@ function TasksContent() {
     return [];
   };
 
-  // LOGIKA FILTER TUGAS: Tugas Selesai otomatis masuk ke tab Riwayat (SELESAI)
+  // Handler Cetak PNG Matriks Komprehensif Seksi
+  const handleExportSectionMatrixPng = async () => {
+    if (!matrixExportRef.current || exportingMatrix) return;
+    setExportingMatrix(true);
+
+    try {
+      const dataUrl = await toPng(matrixExportRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        quality: 0.95,
+      });
+
+      const safeUnit = userUnitName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const link = document.createElement('a');
+      link.download = `Matriks_Kinerja_${safeUnit}_${new Date().getFullYear()}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err: any) {
+      console.error('Gagal convert matriks ke PNG:', err);
+      alert('Gagal mengekspor matriks ke gambar. Silakan coba kembali.');
+    } finally {
+      setExportingMatrix(false);
+    }
+  };
+
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
       t.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -570,7 +605,7 @@ function TasksContent() {
   const getUrgencyBadge = (task: TaskItem) => {
     if (task.status === 'SELESAI') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
           <CheckCircle2 className="w-3.5 h-3.5" /> Selesai
         </span>
       );
@@ -593,13 +628,13 @@ function TasksContent() {
       );
     } else if (diffDays <= threshold) {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-800">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
           Sisa {diffDays} hari (Kritis H-{threshold})
         </span>
       );
     } else {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/60 border border-stone-200 dark:border-white/[0.08]">
           Sisa {diffDays} hari
         </span>
       );
@@ -624,7 +659,7 @@ function TasksContent() {
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-700">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/60 border border-stone-200 dark:border-white/[0.08]">
             Belum Mulai
           </span>
         );
@@ -633,43 +668,57 @@ function TasksContent() {
 
   return (
     <div className="p-4 sm:p-6 md:p-8 space-y-5 md:space-y-6 max-w-7xl mx-auto">
-      {/* HEADER */}
+      {/* HEADER UTAMA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">Daftar Pekerjaan</h1>
-          <p className="text-xs sm:text-sm text-stone-500 dark:text-slate-400 mt-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white/90 tracking-tight">Daftar Pekerjaan</h1>
+          <p className="text-xs sm:text-sm text-stone-500 dark:text-white/60 mt-1">
             Pemantauan tugas aktif berjenjang. Tugas yang tuntas otomatis diarsipkan ke tab Riwayat.
           </p>
         </div>
-        <Link
-          href="/tasks/new"
-          className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-5 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-sm self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> Rekam Tugas Baru
-        </Link>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {/* Tombol Cetak Matriks Seksi Lengkap */}
+          <button
+            onClick={handleExportSectionMatrixPng}
+            disabled={exportingMatrix || tasks.length === 0}
+            className="inline-flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white px-4 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-xs disabled:opacity-50"
+            title="Unduh seluruh rekap pekerjaan dan checklist seksi ke format gambar PNG resmi"
+          >
+            {exportingMatrix ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span>{exportingMatrix ? 'Memproses PNG...' : 'Cetak Matriks Seksi (PNG)'}</span>
+          </button>
+
+          <Link
+            href="/tasks/new"
+            className="inline-flex items-center justify-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white px-5 py-2.5 rounded-full font-semibold text-xs transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Rekam Tugas Baru
+          </Link>
+        </div>
       </div>
 
       {/* FILTER BAR */}
-      <div className="flex flex-col gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-stone-200/70 dark:border-slate-800 shadow-sm transition-colors">
+      <div className="flex flex-col gap-3 bg-white dark:bg-[#1E1E1E] p-3.5 sm:p-4 rounded-2xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card transition-colors">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-stone-400 dark:text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-stone-400 dark:text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Cari uraian tugas / deskripsi singkat / unit kerja..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/70 dark:bg-slate-800/80 rounded-xl border border-stone-200 dark:border-slate-700 text-stone-900 dark:text-slate-100 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
+              className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/70 dark:bg-[#242424] rounded-xl border border-stone-200 dark:border-white/[0.08] text-stone-900 dark:text-white/90 placeholder:text-stone-400 dark:placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
             />
           </div>
 
           {isSuperAdmin && (
             <div className="flex items-center gap-1.5">
-              <Building2 className="w-4 h-4 text-stone-400 dark:text-slate-500 hidden sm:block" />
+              <Building2 className="w-4 h-4 text-stone-400 dark:text-white/40 hidden sm:block" />
               <select
                 value={selectedUnitFilter}
                 onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                className="w-full md:w-auto px-3 py-2 text-xs bg-stone-50 dark:bg-slate-800 rounded-xl border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
+                className="w-full md:w-auto px-3 py-2 text-xs bg-stone-50 dark:bg-[#242424] rounded-xl border border-stone-200 dark:border-white/[0.08] text-stone-700 dark:text-white/80 font-medium focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
               >
                 <option value="ALL_UNITS">🌐 Seluruh Unit (Regional se-Wilayah)</option>
                 <option value="MY_UNIT">Unit Saya Saja</option>
@@ -684,7 +733,7 @@ function TasksContent() {
         </div>
 
         {/* Tab Filter Status & Kategori */}
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-slate-800">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-1 overflow-x-auto w-full lg:w-auto pb-1 lg:pb-0 scrollbar-none">
             {[
               { id: 'ACTIVE', label: 'Semua Aktif' },
@@ -705,8 +754,8 @@ function TasksContent() {
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'bg-[#DF3B68] text-white shadow-xs'
                       : tab.isHistory
-                        ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800/80'
-                        : 'text-stone-600 dark:text-slate-400 hover:bg-stone-100 dark:hover:bg-slate-800'
+                        ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800'
+                        : 'text-stone-600 dark:text-white/60 hover:bg-stone-100 dark:hover:bg-[#2C2C2C]'
                   }`}
                 >
                   {tab.isHistory && <History className="w-3.5 h-3.5" />}
@@ -717,7 +766,7 @@ function TasksContent() {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap self-start sm:self-end lg:self-auto">
-            <span className="text-[11px] font-semibold text-stone-400 dark:text-slate-500 flex items-center gap-1 mr-1">
+            <span className="text-[11px] font-semibold text-stone-400 dark:text-white/40 flex items-center gap-1 mr-1">
               <Tag className="w-3 h-3" /> Jenis:
             </span>
             {[
@@ -732,7 +781,7 @@ function TasksContent() {
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                   categoryFilter === cat.id
                     ? 'bg-[#DF3B68] text-white font-semibold'
-                    : 'bg-stone-100 dark:bg-slate-800 text-stone-600 dark:text-slate-300 hover:bg-stone-200 dark:hover:bg-slate-700'
+                    : 'bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/70 hover:bg-stone-200 dark:hover:bg-[#2C2C2C]'
                 }`}
               >
                 {cat.label}
@@ -743,9 +792,9 @@ function TasksContent() {
       </div>
 
       {/* DAFTAR PEKERJAAN */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-stone-200/70 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
+      <div className="bg-white dark:bg-[#1E1E1E] rounded-3xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card overflow-hidden transition-colors">
         {loading ? (
-          <div className="py-20 text-center text-sm text-stone-400 dark:text-slate-500 flex flex-col items-center justify-center gap-2">
+          <div className="py-20 text-center text-sm text-stone-400 dark:text-white/40 flex flex-col items-center justify-center gap-2">
             <Loader2 className="w-6 h-6 animate-spin text-[#DF3B68]" />
             <span>Memuat daftar tugas...</span>
           </div>
@@ -753,15 +802,15 @@ function TasksContent() {
           <div className="py-20 text-center px-4 space-y-1.5">
             {statusFilter === 'RIWAYAT' || statusFilter === 'SELESAI' ? (
               <>
-                <p className="text-stone-700 dark:text-slate-200 font-bold text-sm">Belum ada riwayat tugas selesai</p>
-                <p className="text-stone-400 dark:text-slate-500 text-xs">
+                <p className="text-stone-700 dark:text-white/80 font-bold text-sm">Belum ada riwayat tugas selesai</p>
+                <p className="text-stone-400 dark:text-white/40 text-xs">
                   Tugas yang progresnya telah mencapai 100% dan berstatus &quot;Selesai&quot; akan otomatis masuk ke sini.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-stone-700 dark:text-slate-200 font-bold text-sm">Tidak ada tugas aktif pada filter ini</p>
-                <p className="text-stone-400 dark:text-slate-500 text-xs">
+                <p className="text-stone-700 dark:text-white/80 font-bold text-sm">Tidak ada tugas aktif pada filter ini</p>
+                <p className="text-stone-400 dark:text-white/40 text-xs">
                   Tugas yang sudah selesai otomatis tersimpan di tab <strong>&quot;Riwayat (Selesai)&quot;</strong>.
                 </p>
               </>
@@ -770,7 +819,7 @@ function TasksContent() {
         ) : (
           <div>
             {/* VIEW 1: DESKTOP TABLE/LIST VIEW */}
-            <div className="hidden md:block divide-y divide-stone-100 dark:divide-slate-800/80">
+            <div className="hidden md:block divide-y divide-stone-100 dark:divide-white/[0.06]">
               {filteredTasks.map((task) => {
                 const isSubExpanded = expandedTaskIds.includes(task.id);
                 const isDescExpanded = expandedDescIds.includes(task.id);
@@ -787,7 +836,7 @@ function TasksContent() {
                 });
 
                 return (
-                  <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-slate-800/40">
+                  <div key={task.id} className="transition-colors hover:bg-stone-50/50 dark:hover:bg-[#242424]/40">
                     <div className="p-5 flex items-center justify-between gap-4">
                       <div className="space-y-1.5 flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -802,23 +851,23 @@ function TasksContent() {
                           {getStatusBadge(task.status)}
                           
                           {task.unit && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
-                              <Building2 className="w-3 h-3 text-stone-500 dark:text-slate-400" />
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-stone-100 dark:bg-[#242424] text-stone-700 dark:text-white/80 px-2 py-0.5 rounded-md border border-stone-200 dark:border-white/[0.08]">
+                              <Building2 className="w-3 h-3 text-stone-500 dark:text-white/40" />
                               {task.unit.name}
                             </span>
                           )}
 
-                          <span className="text-[11px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800/50 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
+                          <span className="text-[11px] font-semibold text-stone-600 dark:text-white/60 bg-stone-50 dark:bg-[#242424] px-2 py-0.5 rounded-md border border-stone-200 dark:border-white/[0.08]">
                             {task.priority}
                           </span>
                         </div>
 
-                        <h3 className="font-bold text-stone-900 dark:text-slate-100 text-base leading-snug">
+                        <h3 className="font-bold text-stone-900 dark:text-white/90 text-base leading-snug">
                           {task.title}
                         </h3>
 
                         {task.short_description && (
-                          <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed pt-0.5 font-normal">
+                          <p className="text-xs text-stone-600 dark:text-white/70 line-clamp-2 leading-relaxed pt-0.5 font-normal">
                             {task.short_description}
                           </p>
                         )}
@@ -830,13 +879,13 @@ function TasksContent() {
                         )}
 
                         <div className="flex items-center gap-3 pt-1 max-w-xs">
-                          <div className="flex-1 h-2 bg-stone-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div className="flex-1 h-2 bg-stone-100 dark:bg-[#2C2C2C] rounded-full overflow-hidden">
                             <div 
                               className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
                               style={{ width: `${progressPct}%` }}
                             />
                           </div>
-                          <span className="text-xs font-semibold text-stone-600 dark:text-slate-300">{progressPct}%</span>
+                          <span className="text-xs font-semibold text-stone-600 dark:text-white/70">{progressPct}%</span>
                         </div>
                       </div>
 
@@ -848,7 +897,7 @@ function TasksContent() {
                             className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
                               isDescExpanded
                                 ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-                                : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-700'
+                                : 'bg-white dark:bg-[#1E1E1E] text-stone-700 dark:text-white/80 border-stone-200 dark:border-white/[0.08] hover:bg-stone-50 dark:hover:bg-[#242424]'
                             }`}
                           >
                             <BookOpen className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -862,8 +911,8 @@ function TasksContent() {
                           onClick={() => toggleSubtasks(task.id)}
                           className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors border ${
                             isSubExpanded 
-                              ? 'bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 border-stone-900 dark:border-slate-100' 
-                              : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700 hover:bg-stone-50 dark:hover:bg-slate-700'
+                              ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 border-stone-900 dark:border-white' 
+                              : 'bg-white dark:bg-[#1E1E1E] text-stone-700 dark:text-white/80 border-stone-200 dark:border-white/[0.08] hover:bg-stone-50 dark:hover:bg-[#242424]'
                           }`}
                         >
                           <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
@@ -879,7 +928,7 @@ function TasksContent() {
                                 href={tool.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs"
                                 title={`Buka Tools: ${tool.name}`}
                               >
                                 <Wrench className="w-3 h-3 text-emerald-600" />
@@ -904,7 +953,7 @@ function TasksContent() {
 
                         <Link
                           href={`/tasks/${task.id}`}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-slate-200 bg-stone-100 dark:bg-slate-800 hover:bg-stone-200 dark:hover:bg-slate-700 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-white/80 bg-stone-100 dark:bg-[#242424] hover:bg-stone-200 dark:hover:bg-[#2C2C2C] transition-colors"
                         >
                           Kelola
                           <ExternalLink className="w-3 h-3" />
@@ -920,8 +969,8 @@ function TasksContent() {
                               <BookOpen className="w-3.5 h-3.5 text-amber-700" /> Dasar Hukum:
                             </span>
                             {regList.map((reg, idx) => (
-                              <div key={idx} className="inline-flex items-center gap-1.5 bg-white dark:bg-slate-800 px-3 py-1 rounded-xl border border-stone-200 dark:border-slate-700 shadow-2xs">
-                                <span className="font-mono text-stone-800 dark:text-slate-200 font-semibold">{reg.name}</span>
+                              <div key={idx} className="inline-flex items-center gap-1.5 bg-white dark:bg-[#1E1E1E] px-3 py-1 rounded-xl border border-stone-200 dark:border-white/[0.08] shadow-2xs">
+                                <span className="font-mono text-stone-800 dark:text-white/80 font-semibold">{reg.name}</span>
                                 {reg.url && (
                                   <a
                                     href={reg.url}
@@ -967,10 +1016,10 @@ function TasksContent() {
                     )}
 
                     {isSubExpanded && (
-                      <div className="px-5 pb-5 pt-2 border-t border-stone-100 dark:border-slate-800 bg-stone-50/50 dark:bg-slate-850 space-y-3 animate-in fade-in duration-150">
+                      <div className="px-5 pb-5 pt-2 border-t border-stone-100 dark:border-white/[0.06] bg-stone-50/50 dark:bg-[#1A1A1A] space-y-3 animate-in fade-in duration-150">
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <p className="text-xs font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <p className="text-xs font-bold text-stone-800 dark:text-white/90 flex items-center gap-1.5">
                               <CheckCircle2 className="w-3.5 h-3.5 text-[#DF3B68]" />
                               <span>Tahapan Sub-Pekerjaan (Klik untuk mencentang progres):</span>
                             </p>
@@ -983,7 +1032,7 @@ function TasksContent() {
                           </div>
 
                           {!task.subtasks || task.subtasks.length === 0 ? (
-                            <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-stone-200 dark:border-slate-700 text-xs text-stone-400 dark:text-slate-500 italic">
+                            <div className="p-3 bg-white dark:bg-[#1E1E1E] rounded-xl border border-stone-200 dark:border-white/[0.08] text-xs text-stone-400 dark:text-white/40 italic">
                               Belum ada sub-pekerjaan yang direkam untuk tugas ini.
                             </div>
                           ) : (
@@ -1003,7 +1052,7 @@ function TasksContent() {
                                     className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2.5 transition-all text-left group cursor-pointer ${
                                       st.is_completed
                                         ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/80 text-emerald-900 dark:text-emerald-300 hover:bg-emerald-100/70'
-                                        : 'bg-white dark:bg-slate-800 border-stone-200 dark:border-slate-700 text-stone-800 dark:text-slate-200 hover:border-[#DF3B68]/40 dark:hover:border-[#DF3B68]/60 hover:bg-rose-50/30'
+                                        : 'bg-white dark:bg-[#1E1E1E] border-stone-200 dark:border-white/[0.08] text-stone-800 dark:text-white/80 hover:border-[#DF3B68]/40 hover:bg-rose-50/30'
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 truncate flex-1 min-w-0">
@@ -1012,9 +1061,9 @@ function TasksContent() {
                                       ) : st.is_completed ? (
                                         <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
                                       ) : (
-                                        <Square className="w-4 h-4 text-stone-400 dark:text-slate-500 shrink-0 group-hover:text-[#DF3B68] group-hover:scale-110 transition-transform" />
+                                        <Square className="w-4 h-4 text-stone-400 dark:text-white/40 shrink-0 group-hover:text-[#DF3B68] group-hover:scale-110 transition-transform" />
                                       )}
-                                      <span className={`truncate font-medium ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500' : 'text-stone-800 dark:text-slate-200'}`}>
+                                      <span className={`truncate font-medium ${st.is_completed ? 'line-through text-stone-400 dark:text-white/40' : 'text-stone-800 dark:text-white/90'}`}>
                                         {idx + 1}. {st.title}
                                       </span>
                                     </div>
@@ -1027,7 +1076,7 @@ function TasksContent() {
                                         </span>
                                       )}
                                       {st.deadline && (
-                                        <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-700 text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-slate-600">
+                                        <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/60 border border-stone-200 dark:border-white/[0.08]">
                                           Batas: {st.deadline}
                                         </span>
                                       )}
@@ -1046,7 +1095,7 @@ function TasksContent() {
             </div>
 
             {/* VIEW 2: MOBILE ADAPTIVE VIEW */}
-            <div className="md:hidden divide-y divide-stone-100 dark:divide-slate-800">
+            <div className="md:hidden divide-y divide-stone-100 dark:divide-white/[0.06]">
               {filteredTasks.map((task) => {
                 const isSubExpanded = expandedTaskIds.includes(task.id);
                 const isDescExpanded = expandedDescIds.includes(task.id);
@@ -1074,23 +1123,23 @@ function TasksContent() {
 
                       {getUrgencyBadge(task)}
                       {getStatusBadge(task.status)}
-                      <span className="text-[10px] font-semibold text-stone-600 dark:text-slate-400 bg-stone-50 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-stone-200 dark:border-slate-700">
+                      <span className="text-[10px] font-semibold text-stone-600 dark:text-white/60 bg-stone-50 dark:bg-[#242424] px-2 py-0.5 rounded-md border border-stone-200 dark:border-white/[0.08]">
                         {task.priority}
                       </span>
                     </div>
 
                     <div className="space-y-1">
-                      <h3 className="font-bold text-stone-900 dark:text-slate-100 text-sm leading-snug">
+                      <h3 className="font-bold text-stone-900 dark:text-white/90 text-sm leading-snug">
                         {task.title}
                       </h3>
 
                       {task.short_description && (
-                        <p className="text-xs text-stone-600 dark:text-slate-300 line-clamp-2 leading-relaxed font-normal">
+                        <p className="text-xs text-stone-600 dark:text-white/70 line-clamp-2 leading-relaxed font-normal">
                           {task.short_description}
                         </p>
                       )}
                       
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-slate-400 pt-0.5">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500 dark:text-white/40 pt-0.5">
                         {task.unit && (
                           <span className="inline-flex items-center gap-1">
                             <Building2 className="w-3.5 h-3.5 text-stone-400" />
@@ -1107,11 +1156,11 @@ function TasksContent() {
                     )}
 
                     <div className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-semibold text-stone-600 dark:text-slate-300">
+                      <div className="flex items-center justify-between text-xs font-semibold text-stone-600 dark:text-white/70">
                         <span>Capaian Progres</span>
                         <span>{progressPct}%</span>
                       </div>
-                      <div className="h-2 bg-stone-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-2 bg-stone-100 dark:bg-[#2C2C2C] rounded-full overflow-hidden">
                         <div 
                           className={`h-full rounded-full transition-all duration-300 ${getProgressBarColor(progressPct)}`}
                           style={{ width: `${progressPct}%` }}
@@ -1125,8 +1174,8 @@ function TasksContent() {
                         onClick={() => toggleSubtasks(task.id)}
                         className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-semibold border transition-colors ${
                           isSubExpanded 
-                            ? 'bg-stone-900 dark:bg-slate-100 text-white dark:text-slate-900 border-stone-900 dark:border-slate-100' 
-                            : 'bg-stone-50 dark:bg-slate-800 text-stone-700 dark:text-slate-200 border-stone-200 dark:border-slate-700'
+                            ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 border-stone-900 dark:border-white' 
+                            : 'bg-stone-50 dark:bg-[#242424] text-stone-700 dark:text-white/70 border border-stone-200 dark:border-white/[0.08]'
                         }`}
                       >
                         <Layers className="w-3.5 h-3.5 text-[#DF3B68]" />
@@ -1151,7 +1200,7 @@ function TasksContent() {
                           className={`inline-flex items-center gap-1 py-1.5 px-2.5 rounded-lg text-[11px] font-semibold border whitespace-nowrap transition-colors ${
                             isDescExpanded 
                               ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-300 border-amber-300' 
-                              : 'bg-white dark:bg-slate-800 text-stone-700 dark:text-slate-300 border-stone-200 dark:border-slate-700'
+                              : 'bg-white dark:bg-[#1E1E1E] text-stone-700 dark:text-white/70 border-stone-200 dark:border-white/[0.08]'
                           }`}
                         >
                           <BookOpen className="w-3.5 h-3.5 text-amber-600" />
@@ -1191,8 +1240,8 @@ function TasksContent() {
                             <span className="font-bold text-amber-900 dark:text-amber-400 block mb-1">Dasar Hukum:</span>
                             <div className="space-y-1">
                               {regList.map((r, idx) => (
-                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-slate-800 p-2 rounded-xl border border-stone-200 dark:border-slate-700">
-                                  <span className="font-mono text-stone-800 dark:text-slate-200">{r.name}</span>
+                                <div key={idx} className="flex items-center justify-between bg-white dark:bg-[#1E1E1E] p-2 rounded-xl border border-stone-200 dark:border-white/[0.08]">
+                                  <span className="font-mono text-stone-800 dark:text-white/80">{r.name}</span>
                                   {r.url && (
                                     <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 text-[11px] flex items-center gap-0.5">
                                       Buka <ExternalLink className="w-2.5 h-2.5" />
@@ -1207,7 +1256,7 @@ function TasksContent() {
                         {toolsList.length > 0 && (
                           <div>
                             <span className="font-bold text-emerald-900 dark:text-emerald-400 block mb-1 flex items-center gap-1">
-                              <Wrench className="w-3 h-3" /> Tools / Kertas Kerja:
+                              <Wrench className="w-3.5 h-3.5 text-emerald-600" /> Tools / Kertas Kerja:
                             </span>
                             <div className="space-y-1">
                               {toolsList.map((t, idx) => (
@@ -1234,13 +1283,22 @@ function TasksContent() {
           </div>
         )}
       </div>
+
+      {/* ELEMEN OFF-SCREEN TERSEMBUNYI UNTUK EKSPOR MATRIKS SEKSI KE PNG */}
+      <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+        <SectionMatrixExport
+          ref={matrixExportRef}
+          unitName={userUnitName}
+          tasks={filteredTasks}
+        />
+      </div>
     </div>
   );
 }
 
 export default function TasksPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm text-stone-400 dark:text-slate-500">Memuat...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-sm text-stone-400 dark:text-white/40">Memuat...</div>}>
       <TasksContent />
     </Suspense>
   );
