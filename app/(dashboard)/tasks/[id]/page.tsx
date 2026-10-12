@@ -22,16 +22,13 @@ import {
   BookOpen, 
   Share2,
   Wrench, 
-  FileText, 
   ListCollapse,
-  User,
   ArrowUp,
   ArrowDown,
   Check,
   X,
   Edit2,
-  Download,
-  Copy
+  Download
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { TaskShareModal } from '@/components/tasks/task-share-modal';
@@ -139,7 +136,7 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
   if (sections.length <= 1 && sections[0]?.title === 'Rincian Petunjuk Teknis') {
     return (
-      <div className="p-3.5 bg-stone-50/80 dark:bg-[#242424] rounded-2xl border border-stone-200/80 dark:border-white/[0.08] text-xs text-stone-700 dark:text-white/80 leading-relaxed">
+      <div className="p-3.5 bg-stone-50/80 dark:bg-[#1A2332] rounded-2xl border border-stone-200/80 dark:border-white/10 text-xs text-stone-700 dark:text-slate-200 leading-relaxed">
         {rawContent.includes('<') && rawContent.includes('>') ? (
           <div dangerouslySetInnerHTML={{ __html: rawContent }} />
         ) : (
@@ -153,13 +150,13 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
 
   return (
     <div className="space-y-2.5">
-      <div className="p-3.5 bg-stone-50/90 dark:bg-[#242424] rounded-2xl border border-stone-200/90 dark:border-white/[0.08] shadow-2xs">
-        <div className="flex items-center justify-between pb-2 border-b border-stone-200/70 dark:border-white/[0.06] text-xs">
-          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-white/90">
+      <div className="p-3.5 bg-stone-50/90 dark:bg-[#1A2332] rounded-2xl border border-stone-200/90 dark:border-white/10 shadow-2xs">
+        <div className="flex items-center justify-between pb-2 border-b border-stone-200/70 dark:border-white/5 text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-stone-900 dark:text-slate-100">
             <ListCollapse className="w-3.5 h-3.5 text-[#DF3B68]" />
             <span>Daftar Isi Petunjuk Teknis ({sections.length} Bab)</span>
           </div>
-          <span className="text-[11px] text-stone-400 dark:text-white/40">
+          <span className="text-[11px] text-stone-400 dark:text-slate-500">
             {activeSectionId ? 'Klik bab aktif untuk menutup' : 'Pilih bab untuk melihat rincian'}
           </span>
         </div>
@@ -175,10 +172,10 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-2xs ${
                   isActive
                     ? 'bg-[#DF3B68] text-white font-bold ring-2 ring-[#DF3B68]/30 shadow-xs'
-                    : 'bg-white dark:bg-[#1E1E1E] text-stone-700 dark:text-white/70 hover:bg-stone-100 dark:hover:bg-[#2C2C2C] border border-stone-200 dark:border-white/[0.08]'
+                    : 'bg-white dark:bg-[#131B26] text-stone-700 dark:text-slate-300 hover:bg-stone-100 dark:hover:bg-[#243044] border border-stone-200 dark:border-white/10'
                 }`}
               >
-                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400 dark:text-white/40'}`}>{idx + 1}.</span>
+                <span className={`text-[10px] ${isActive ? 'text-white/80' : 'text-stone-400 dark:text-slate-500'}`}>{idx + 1}.</span>
                 <span>{sec.title}</span>
                 <span className="text-[10px] ml-0.5 opacity-80">{isActive ? '▲' : '▼'}</span>
               </button>
@@ -188,21 +185,21 @@ function NotionDocViewer({ rawContent }: { rawContent: string }) {
       </div>
 
       {activeSection && (
-        <div className="p-4 bg-white dark:bg-[#242424] rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
-          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-white/[0.06]">
+        <div className="p-4 bg-white dark:bg-[#131B26] rounded-2xl border border-[#DF3B68]/30 dark:border-[#DF3B68]/40 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150 space-y-2">
+          <div className="flex items-center justify-between pb-2 border-b border-stone-100 dark:border-white/5">
             <p className="font-extrabold text-[#DF3B68] dark:text-rose-400 text-xs uppercase tracking-wide flex items-center gap-1.5">
               <span>📖 {activeSection.title}</span>
             </p>
             <button
               type="button"
               onClick={() => setActiveSectionId(null)}
-              className="text-[11px] text-stone-400 dark:text-white/40 hover:text-stone-700 dark:hover:text-white underline"
+              className="text-[11px] text-stone-400 dark:text-slate-400 hover:text-stone-700 dark:hover:text-slate-200 underline"
             >
               Tutup Uraian
             </button>
           </div>
 
-          <div className="text-xs text-stone-800 dark:text-white/80 leading-relaxed pt-1">
+          <div className="text-xs text-stone-800 dark:text-slate-200 leading-relaxed pt-1">
             {activeSection.content.includes('<') && activeSection.content.includes('>') ? (
               <div 
                 className="space-y-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_b]:font-bold"
@@ -252,6 +249,7 @@ export default function TaskDetailPage() {
   // States Form Kontrol Cepat & Status
   const [currentStatus, setCurrentStatus] = useState<string>('BELUM_DIKERJAKAN');
   const [currentDeadline, setCurrentDeadline] = useState<string>('');
+  const [currentMaxScoreDeadline, setCurrentMaxScoreDeadline] = useState<string>('');
   const [currentPriority, setCurrentPriority] = useState<string>('SEDANG');
   const [evidenceLinkInput, setEvidenceLinkInput] = useState('');
   const [kendalaInput, setKendalaInput] = useState('');
@@ -287,11 +285,12 @@ export default function TaskDetailPage() {
     setTask(taskData);
     setCurrentStatus(taskData.status);
     setCurrentDeadline(taskData.deadline);
+    setCurrentMaxScoreDeadline(taskData.max_score_deadline || '');
     setCurrentPriority(taskData.priority);
     setEvidenceLinkInput(taskData.evidence_link || '');
     setKendalaInput(taskData.kendala_note || '');
 
-    // Ambil Subtasks berurutan berdasarkan order_index
+    // Ambil Subtasks berurutan
     const { data: subData, error: subError } = await supabase
       .from('subtasks')
       .select(`
@@ -319,7 +318,7 @@ export default function TaskDetailPage() {
 
     if (picData) setPics(picData.map((p: any) => p.profile));
 
-    // Ambil Daftar Pegawai di Unit ini
+    // Ambil Daftar Pegawai di Unit
     if (taskData.unit_id) {
       const { data: staffData } = await supabase
         .from('profiles')
@@ -332,6 +331,21 @@ export default function TaskDetailPage() {
     }
 
     setLoading(false);
+  };
+
+  // Hitung ulang deadline nilai maksimal jika batas regulasi diganti manual
+  const handleDeadlineChange = (newDeadlineVal: string) => {
+    setCurrentDeadline(newDeadlineVal);
+    if (task?.max_score_days_before && task.max_score_days_before > 0 && newDeadlineVal) {
+      const d = new Date(newDeadlineVal);
+      if (!isNaN(d.getTime())) {
+        d.setDate(d.getDate() - task.max_score_days_before);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        setCurrentMaxScoreDeadline(`${y}-${m}-${day}`);
+      }
+    }
   };
 
   const getProgressBarColor = (pct: number) => {
@@ -359,7 +373,6 @@ export default function TaskDetailPage() {
     return [];
   };
 
-  // Handler Download PNG Cepat Langsung
   const handleDownloadPng = async () => {
     if (!exportCardRef.current || downloadingPng) return;
     setDownloadingPng(true);
@@ -432,7 +445,7 @@ export default function TaskDetailPage() {
     setManualNotice('');
 
     if (nextStatus === 'SELESAI') {
-      setSuccessMsg('Semua tahapan tuntas! Tugas otomatis selesai dan tersimpan ke riwayat.');
+      setSuccessMsg('Semua tahapan tuntas! Tugas otomatis selesai.');
       setTimeout(() => setSuccessMsg(''), 4000);
     }
 
@@ -599,6 +612,7 @@ export default function TaskDetailPage() {
       .update({
         status: currentStatus,
         deadline: currentDeadline,
+        max_score_deadline: currentMaxScoreDeadline || null,
         priority: currentPriority,
         evidence_link: evidenceLinkInput.trim() || null,
         kendala_note: currentStatus === 'TERKENDALA' ? kendalaInput.trim() : (kendalaInput.trim() || null),
@@ -638,7 +652,7 @@ export default function TaskDetailPage() {
         }
       }
 
-      setSuccessMsg(`Status tugas berhasil diperbarui ke "${currentStatus}"!`);
+      setSuccessMsg(`Status dan tanggal tenggat tugas berhasil diperbarui!`);
       setManualNotice('');
       setTimeout(() => setSuccessMsg(''), 4000);
       loadTaskDetails();
@@ -668,7 +682,7 @@ export default function TaskDetailPage() {
     if (task.status === 'SELESAI') {
       return (
         <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-          <CheckCircle2 className="w-3.5 h-3.5" /> Selesai Tervalidasi
+          <CheckCircle2 className="w-3.5 h-3.5" /> Selesai
         </span>
       );
     }
@@ -699,7 +713,7 @@ export default function TaskDetailPage() {
       );
     } else {
       return (
-        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 dark:bg-[#242424] text-stone-700 dark:text-white/70 border border-stone-200 dark:border-white/[0.08]">
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 border border-stone-200 dark:border-white/10">
           Sisa {diffDays} hari
         </span>
       );
@@ -707,13 +721,13 @@ export default function TaskDetailPage() {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-sm text-stone-400 dark:text-white/40">Memuat rincian tugas...</div>;
+    return <div className="p-12 text-center text-sm text-stone-400 dark:text-slate-500">Memuat rincian tugas...</div>;
   }
 
   if (!task) {
     return (
       <div className="p-8 text-center space-y-4">
-        <p className="text-stone-600 dark:text-white/60">{errorMsg || 'Tugas tidak ditemukan'}</p>
+        <p className="text-stone-600 dark:text-slate-400">{errorMsg || 'Tugas tidak ditemukan'}</p>
         <Link href="/tasks" className="text-sm font-semibold text-[#DF3B68]">Kembali ke Daftar Tugas</Link>
       </div>
     );
@@ -721,11 +735,20 @@ export default function TaskDetailPage() {
 
   const regList = getRegulationsList();
   const toolsList = getToolsList();
+  
   const formattedDeadline = new Date(task.deadline).toLocaleDateString('id-ID', {
     day: 'numeric',
     month: 'short',
     year: 'numeric'
   });
+
+  const formattedMaxScoreDeadline = task.max_score_deadline
+    ? new Date(task.max_score_deadline).toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })
+    : null;
 
   return (
     <div className="p-4 sm:p-6 md:p-8 space-y-6 max-w-5xl mx-auto">
@@ -749,13 +772,12 @@ export default function TaskDetailPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/tasks"
-          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-white/60 hover:text-stone-900 dark:hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 text-sm font-medium text-stone-600 dark:text-slate-400 hover:text-stone-900 dark:hover:text-slate-100 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar
         </Link>
         
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Tombol Unduh PNG Cepat */}
           <button
             type="button"
             onClick={handleDownloadPng}
@@ -767,7 +789,6 @@ export default function TaskDetailPage() {
             Cetak PNG
           </button>
 
-          {/* Tombol Sharing Hub */}
           <button
             type="button"
             onClick={() => setIsShareModalOpen(true)}
@@ -779,9 +800,9 @@ export default function TaskDetailPage() {
 
           <Link
             href={`/tasks/${taskId}/edit`}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-white/80 bg-white dark:bg-[#1E1E1E] border border-stone-200 dark:border-white/[0.08] hover:bg-stone-50 dark:hover:bg-[#242424] transition-colors shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-stone-700 dark:text-slate-200 bg-white dark:bg-[#131B26] border border-stone-200 dark:border-white/10 hover:bg-stone-50 dark:hover:bg-[#1A2332] transition-colors shadow-xs"
           >
-            <Edit3 className="w-3.5 h-3.5 text-stone-500 dark:text-white/50" />
+            <Edit3 className="w-3.5 h-3.5 text-stone-500 dark:text-slate-400" />
             Edit Lengkap
           </Link>
 
@@ -818,26 +839,36 @@ export default function TaskDetailPage() {
       )}
 
       {/* Header Rincian Tugas */}
-      <div className="bg-white dark:bg-[#1E1E1E] p-6 md:p-8 rounded-3xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card space-y-4 transition-colors">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 dark:border-white/[0.06] pb-3">
+      <div className="bg-white dark:bg-[#131B26] p-6 md:p-8 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 dark:border-white/5 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
+            {/* TANGGAL TENGGAT REGULASI */}
             <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-[#DF3B68] text-white px-3 py-1 rounded-full shadow-2xs">
               <Calendar className="w-3.5 h-3.5 text-white/90" />
-              <span>Tenggat: {formattedDeadline}</span>
+              <span>Batas Regulasi: {formattedDeadline}</span>
             </span>
 
+            {/* TANGGAL TENGGAT NILAI MAKSIMAL (JIKA DIKONFIGURASI) */}
+            {formattedMaxScoreDeadline && (
+              <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-amber-500/10 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 px-3 py-1 rounded-full shadow-2xs">
+                <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>Batas Nilai Maksimal: {formattedMaxScoreDeadline} {task.max_score_days_before ? `(H-${task.max_score_days_before})` : ''}</span>
+              </span>
+            )}
+
             {getDeadlineStatusBadge()}
-            <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 dark:bg-[#242424] text-stone-700 dark:text-white/70 border-stone-200 dark:border-white/[0.08]">
+
+            <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 border-stone-200 dark:border-white/10">
               Periode {task.period_type} {task.period_month ? `(Bulan ${task.period_month}/${task.period_year})` : ''}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-stone-400 dark:text-white/40 font-medium">Prioritas:</span>
+            <span className="text-xs text-stone-400 dark:text-slate-400 font-medium">Prioritas:</span>
             <select
               value={currentPriority}
               onChange={(e) => setCurrentPriority(e.target.value)}
-              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-[#242424] text-stone-800 dark:text-white/90"
+              className="text-xs font-bold px-2.5 py-1 rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-stone-800 dark:text-slate-200"
             >
               <option value="RENDAH">RENDAH</option>
               <option value="SEDANG">SEDANG</option>
@@ -847,44 +878,59 @@ export default function TaskDetailPage() {
         </div>
 
         <div className="space-y-1.5">
-          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white/90 leading-snug">
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-slate-100 leading-snug">
             {task.title}
           </h1>
 
           {task.short_description && (
-            <p className="text-xs sm:text-sm text-stone-600 dark:text-white/70 leading-relaxed font-normal pt-0.5">
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-slate-300 leading-relaxed font-normal pt-0.5">
               {task.short_description}
             </p>
           )}
           
-          <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-white/60 pt-2">
-            <CalendarDays className="w-4 h-4 text-[#DF3B68] dark:text-rose-400" />
-            <span className="font-semibold">Ubah Tenggat Waktu:</span>
-            <input
-              type="date"
-              value={currentDeadline}
-              onChange={(e) => setCurrentDeadline(e.target.value)}
-              className="px-2 py-1 text-xs border border-stone-200 dark:border-white/[0.08] rounded-lg bg-stone-50 dark:bg-[#242424] text-stone-800 dark:text-white/90 font-mono"
-            />
+          <div className="flex flex-wrap items-center gap-4 text-xs text-stone-600 dark:text-slate-400 pt-2">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-[#DF3B68] dark:text-rose-400" />
+              <span className="font-semibold text-stone-700 dark:text-slate-300">Ubah Batas Regulasi:</span>
+              <input
+                type="date"
+                value={currentDeadline}
+                onChange={(e) => handleDeadlineChange(e.target.value)}
+                className="px-2 py-1 text-xs border border-stone-200 dark:border-white/10 rounded-lg bg-stone-50 dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 font-mono"
+              />
+            </div>
+
+            {currentMaxScoreDeadline && (
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-500" />
+                <span className="font-semibold text-stone-700 dark:text-slate-300">Target Nilai Maksimal:</span>
+                <input
+                  type="date"
+                  value={currentMaxScoreDeadline}
+                  onChange={(e) => setCurrentMaxScoreDeadline(e.target.value)}
+                  className="px-2 py-1 text-xs border border-amber-300 dark:border-amber-700/60 rounded-lg bg-amber-50/50 dark:bg-[#1A2332] text-amber-900 dark:text-amber-200 font-mono"
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Petunjuk Teknis & Deskripsi */}
+        {/* Petunjuk Teknis */}
         {task.description && (
           <div className="pt-2">
             <NotionDocViewer rawContent={task.description} />
           </div>
         )}
 
-        {/* Dasar Hukum (Multi-Regulasi) */}
+        {/* Dasar Hukum */}
         {regList.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
-            <span className="font-bold text-stone-800 dark:text-white/90 flex items-center gap-1">
+            <span className="font-bold text-stone-800 dark:text-slate-200 flex items-center gap-1">
               <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> Dasar Hukum:
             </span>
             {regList.map((reg, idx) => (
-              <div key={idx} className="inline-flex items-center gap-1.5 bg-stone-100 dark:bg-[#242424] px-2.5 py-1 rounded-lg border border-stone-200 dark:border-white/[0.08] shadow-2xs">
-                <span className="font-mono text-stone-800 dark:text-white/80 font-semibold">{reg.name}</span>
+              <div key={idx} className="inline-flex items-center gap-1.5 bg-stone-100 dark:bg-[#1A2332] px-2.5 py-1 rounded-lg border border-stone-200 dark:border-white/10 shadow-2xs">
+                <span className="font-mono text-stone-800 dark:text-slate-200 font-semibold">{reg.name}</span>
                 {reg.url && (
                   <a
                     href={reg.url}
@@ -901,10 +947,10 @@ export default function TaskDetailPage() {
           </div>
         )}
 
-        {/* Tools & Aplikasi Kerja */}
+        {/* Tools & Kertas Kerja */}
         {toolsList.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
-            <span className="font-bold text-emerald-900 dark:text-emerald-400 flex items-center gap-1">
+            <span className="font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1">
               <Wrench className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Tools & Kertas Kerja:
             </span>
             {toolsList.map((tool, idx) => (
@@ -924,9 +970,9 @@ export default function TaskDetailPage() {
 
         {pics.length > 0 && (
           <div className="pt-1 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-stone-500 dark:text-white/40">PIC Utama Tugas:</span>
+            <span className="text-xs font-semibold text-stone-500 dark:text-slate-400">PIC Utama Tugas:</span>
             {pics.map((p) => (
-              <span key={p.id} className="text-[11px] bg-stone-100 dark:bg-[#242424] text-stone-700 dark:text-white/80 px-2.5 py-0.5 rounded-full font-medium border border-stone-200 dark:border-white/[0.08]">
+              <span key={p.id} className="text-[11px] bg-stone-100 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 px-2.5 py-0.5 rounded-full font-medium border border-stone-200 dark:border-white/10">
                 {p.full_name} ({p.role})
               </span>
             ))}
@@ -935,11 +981,11 @@ export default function TaskDetailPage() {
 
         {/* Progress Bar */}
         <div className="pt-2 space-y-1.5">
-          <div className="flex justify-between text-xs font-semibold text-stone-700 dark:text-white/70">
+          <div className="flex justify-between text-xs font-semibold text-stone-700 dark:text-slate-300">
             <span>Kalkulasi Progres Pelaksanaan</span>
             <span className="font-mono">{task.progress_pct}%</span>
           </div>
-          <div className="w-full h-3 bg-stone-100 dark:bg-[#2C2C2C] rounded-full overflow-hidden border border-stone-200/60 dark:border-white/[0.06]">
+          <div className="w-full h-3 bg-stone-100 dark:bg-[#1A2332] rounded-full overflow-hidden border border-stone-200/60 dark:border-white/10">
             <div 
               className={`h-full transition-all duration-500 rounded-full ${getProgressBarColor(task.progress_pct || 0)}`}
               style={{ width: `${task.progress_pct || 0}%` }}
@@ -951,28 +997,28 @@ export default function TaskDetailPage() {
       {/* Subtasks (Kiri) & Kontrol Cepat (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Kolom Subtasks */}
-        <div className="md:col-span-2 bg-white dark:bg-[#1E1E1E] p-6 rounded-3xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card space-y-4 transition-colors">
-          <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/[0.06] pb-3">
+        <div className="md:col-span-2 bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+          <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/5 pb-3">
             <div>
-              <h2 className="font-bold text-stone-900 dark:text-white/90 text-base">Checklist Sub-pekerjaan, Urutan & PIC</h2>
-              <p className="text-xs text-stone-500 dark:text-white/60">
+              <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan, Urutan & PIC</h2>
+              <p className="text-xs text-stone-500 dark:text-slate-400">
                 Gunakan panah ▲ / ▼ untuk menata urutan atau ubah data tahapan secara inline.
               </p>
             </div>
-            <span className="text-xs font-semibold text-stone-500 dark:text-white/60 bg-stone-100 dark:bg-[#242424] px-2.5 py-1 rounded-full border border-stone-200 dark:border-white/[0.08]">
+            <span className="text-xs font-semibold text-stone-500 dark:text-slate-300 bg-stone-100 dark:bg-[#1A2332] px-2.5 py-1 rounded-full border border-stone-200 dark:border-white/10">
               {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
             </span>
           </div>
 
           {/* Form Tambah Subtask Baru */}
-          <form onSubmit={handleAddSubtask} className="flex flex-col gap-2 p-3 bg-stone-50 dark:bg-[#242424] rounded-2xl border border-stone-200 dark:border-white/[0.08]">
+          <form onSubmit={handleAddSubtask} className="flex flex-col gap-2 p-3 bg-stone-50 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10">
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 placeholder="Ketik uraian tahapan sub-pekerjaan baru..."
                 value={newSubtaskTitle}
                 onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                className="flex-1 px-3 py-2 text-xs bg-white dark:bg-[#1E1E1E] text-stone-900 dark:text-white/90 rounded-xl border border-stone-200 dark:border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
+                className="flex-1 px-3 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
               />
             </div>
 
@@ -980,7 +1026,7 @@ export default function TaskDetailPage() {
               <select
                 value={newSubtaskPicId}
                 onChange={(e) => setNewSubtaskPicId(e.target.value)}
-                className="flex-1 min-w-[160px] px-2.5 py-2 text-xs bg-white dark:bg-[#1E1E1E] text-stone-700 dark:text-white/80 rounded-xl border border-stone-200 dark:border-white/[0.08]"
+                className="flex-1 min-w-[160px] px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-700 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10"
               >
                 <option value="">-- Tanpa PIC (Kosong) --</option>
                 {staffList.map((staff) => (
@@ -995,14 +1041,14 @@ export default function TaskDetailPage() {
                 max={currentDeadline || undefined}
                 value={newSubtaskDeadline}
                 onChange={(e) => setNewSubtaskDeadline(e.target.value)}
-                className="px-2.5 py-2 text-xs bg-white dark:bg-[#1E1E1E] text-stone-800 dark:text-white/90 rounded-xl border border-stone-200 dark:border-white/[0.08] font-mono"
+                className="px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10 font-mono"
                 title="Batas waktu tahapan (opsional)"
               />
 
               <button
                 type="submit"
                 disabled={addingSubtask || !newSubtaskTitle.trim()}
-                className="px-4 py-2 bg-stone-900 dark:bg-white text-white dark:text-stone-900 rounded-xl hover:bg-stone-800 disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
+                className="px-4 py-2 bg-stone-900 dark:bg-[#DF3B68] text-white rounded-xl hover:bg-stone-800 dark:hover:bg-[#C72F58] disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
               >
                 {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Tambah
@@ -1011,9 +1057,9 @@ export default function TaskDetailPage() {
           </form>
 
           {/* List Subtasks */}
-          <div className="divide-y divide-stone-100 dark:divide-white/[0.06] pt-1">
+          <div className="divide-y divide-stone-100 dark:divide-white/5 pt-1">
             {subtasks.length === 0 ? (
-              <div className="py-8 text-center text-xs text-stone-400 dark:text-white/40">
+              <div className="py-8 text-center text-xs text-stone-400 dark:text-slate-500">
                 Belum ada tahapan sub-pekerjaan. Tambahkan tahapan pada formulir di atas.
               </div>
             ) : (
@@ -1053,14 +1099,14 @@ export default function TaskDetailPage() {
                             type="text"
                             value={editTitleInput}
                             onChange={(e) => setEditTitleInput(e.target.value)}
-                            className="flex-1 px-2.5 py-1 text-xs border border-stone-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-[#1E1E1E] text-stone-900 dark:text-white/90 font-medium"
+                            className="flex-1 px-2.5 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-medium"
                           />
                           <input
                             type="date"
                             max={currentDeadline || undefined}
                             value={editDeadlineInput}
                             onChange={(e) => setEditDeadlineInput(e.target.value)}
-                            className="px-2 py-1 text-xs border border-stone-300 dark:border-white/[0.12] rounded-lg bg-white dark:bg-[#1E1E1E] text-stone-900 dark:text-white/90 font-mono"
+                            className="px-2 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-mono"
                           />
                           <div className="flex items-center gap-1">
                             <button
@@ -1088,9 +1134,9 @@ export default function TaskDetailPage() {
                             type="checkbox"
                             checked={st.is_completed}
                             onChange={() => handleToggleSubtask(st.id, st.is_completed)}
-                            className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-white/[0.15] cursor-pointer shrink-0"
+                            className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-600 cursor-pointer shrink-0"
                           />
-                          <span className={`text-xs md:text-sm truncate ${st.is_completed ? 'line-through text-stone-400 dark:text-white/40 font-normal' : 'text-stone-800 dark:text-white/90 font-medium'}`}>
+                          <span className={`text-xs md:text-sm truncate ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
                             {idx + 1}. {st.title}
                           </span>
                         </label>
@@ -1103,7 +1149,7 @@ export default function TaskDetailPage() {
                           <select
                             value={currentSubPicId}
                             onChange={(e) => handleUpdateSubtaskPic(st.id, e.target.value)}
-                            className="text-[11px] font-semibold py-1 px-2 pr-6 rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-[#242424] text-stone-700 dark:text-white/80 max-w-[130px] truncate"
+                            className="text-[11px] font-semibold py-1 px-2 pr-6 rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 max-w-[130px] truncate"
                             title="Ubah PIC tahapan"
                           >
                             <option value="">-- Tanpa PIC --</option>
@@ -1116,7 +1162,7 @@ export default function TaskDetailPage() {
                         </div>
 
                         {st.deadline && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/60 border border-stone-200 dark:border-white/[0.08]">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-white/10">
                             Batas: {st.deadline}
                           </span>
                         )}
@@ -1148,18 +1194,18 @@ export default function TaskDetailPage() {
         </div>
 
         {/* Kolom Kontrol Status & Bukti */}
-        <div className="bg-white dark:bg-[#1E1E1E] p-6 rounded-3xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card space-y-4 flex flex-col justify-between transition-colors">
+        <div className="bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 flex flex-col justify-between transition-colors">
           <div className="space-y-4">
-            <h2 className="font-bold text-stone-900 dark:text-white/90 text-base">Status & Validasi Bukti</h2>
+            <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Status & Validasi Bukti</h2>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 dark:text-white/80 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Ubah Status Pekerjaan:
               </label>
               <select
                 value={currentStatus}
                 onChange={(e) => handleManualStatusChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-[#242424] text-stone-800 dark:text-white/90 focus:ring-2 focus:ring-[#DF3B68]/30"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 focus:ring-2 focus:ring-[#DF3B68]/30"
               >
                 <option value="BELUM_DIKERJAKAN">Belum Mulai</option>
                 <option value="ON_PROGRESS">On Progress (Sedang Dikerjakan)</option>
@@ -1169,7 +1215,7 @@ export default function TaskDetailPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 dark:text-white/80 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Link Bukti Dukung (Google Drive / Cloud)
               </label>
               <div className="relative">
@@ -1179,7 +1225,7 @@ export default function TaskDetailPage() {
                   placeholder="https://drive.google.com/..."
                   value={evidenceLinkInput}
                   onChange={(e) => setEvidenceLinkInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 dark:bg-[#242424] text-stone-800 dark:text-white/90 rounded-xl border border-stone-200 dark:border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 font-mono"
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 font-mono"
                 />
               </div>
               {task.evidence_link && (
@@ -1195,7 +1241,7 @@ export default function TaskDetailPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-stone-700 dark:text-white/80 mb-1">
+              <label className="block text-xs font-semibold text-stone-700 dark:text-slate-300 mb-1">
                 Catatan / Kendala {currentStatus === 'TERKENDALA' && <span className="text-rose-500">*</span>}
               </label>
               <textarea
@@ -1203,12 +1249,12 @@ export default function TaskDetailPage() {
                 placeholder="Deskripsikan hambatan atau kendala eksekusi..."
                 value={kendalaInput}
                 onChange={(e) => setKendalaInput(e.target.value)}
-                className="w-full p-2.5 text-xs bg-stone-50 dark:bg-[#242424] text-stone-800 dark:text-white/90 rounded-xl border border-stone-200 dark:border-white/[0.08] focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 resize-none"
+                className="w-full p-2.5 text-xs bg-stone-50 dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30 resize-none"
               />
             </div>
           </div>
 
-          <div className="space-y-2 pt-4 border-t border-stone-100 dark:border-white/[0.06]">
+          <div className="space-y-2 pt-4 border-t border-stone-100 dark:border-white/5">
             <button
               onClick={handleSaveChanges}
               disabled={savingChanges}
