@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -18,12 +18,17 @@ import {
   Clock,
   RotateCw,
   Sparkles,
-  Layers
+  Layers,
+  Calendar,
+  Power,
+  PowerOff,
+  Filter
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 type PeriodType = 'BULANAN' | 'TRIWULANAN' | 'SEMESTERAN' | 'TAHUNAN' | 'INSIDENTIL';
+type FilterTab = 'ALL' | 'RECURRING_ACTIVE' | 'RECURRING_PAUSED' | 'INCIDENTAL';
 
 interface TemplateItem {
   id: string;
@@ -57,7 +62,9 @@ export default function TusiCatalogPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedTusi, setSelectedTusi] = useState('ALL');
+  const [activeTab, setActiveTab] = useState<FilterTab>('ALL');
   const [cloningId, setCloningId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
@@ -77,6 +84,34 @@ export default function TusiCatalogPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editLegalBasis, setEditLegalBasis] = useState('');
 
+  // Info Siklus Waktu Berjalan Saat Ini
+  const currentPeriodInfo = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    const quarter = Math.ceil(month / 3);
+    const semester = month <= 6 ? 1 : 2;
+
+    const monthNames = [
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+
+    // Siklus berikutnya (Tanggal 1 bulan depan)
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextRunStr = `1 ${monthNames[nextMonth - 1]} ${nextYear}`;
+
+    return {
+      currentMonthName: monthNames[month - 1],
+      currentMonthNum: month,
+      currentYear: year,
+      currentQuarter: quarter,
+      currentSemester: semester,
+      nextRunSchedule: nextRunStr,
+    };
+  }, []);
+
   useEffect(() => {
     loadUserAndTemplates();
   }, []);
@@ -85,7 +120,6 @@ export default function TusiCatalogPage() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
       let currentTusi = 'UMUM';
       let adminFlag = false;
 
@@ -115,18 +149,14 @@ export default function TusiCatalogPage() {
     }
   };
 
-  // FETCH TEMPLATES DENGAN QUERY AMAN (MENCEGAH ERROR POSTGREST FOREIGN KEY)
   const fetchTemplates = async () => {
     try {
-      // 1. Coba query dengan join created_by_unit
       const { data, error } = await supabase
         .from('task_templates')
         .select('*, unit:created_by_unit(name, code)')
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('Fallback ke select(*) murni karena foreign key alias:', error.message);
-        // Fallback langsung ambil data mentah tanpa join
         const { data: fallbackData, error: fbError } = await supabase
           .from('task_templates')
           .select('*')
@@ -147,6 +177,31 @@ export default function TusiCatalogPage() {
     if (!currentUserProfile) return false;
     if (isSuperAdmin) return true;
     return currentUserProfile.unit_id === template.created_by_unit;
+  };
+
+  // Toggle Cepat Status Klerikal / Auto-Cycle (Aktifkan / Hentikan)
+  const handleToggleRecurring = async (template: TemplateItem) => {
+    const newStatus = !(template.is_recurring ?? (template.period_type !== 'INSIDENTIL'));
+    setTogglingId(template.id);
+
+    const { error } = await supabase
+      .from('task_templates')
+      .update({ is_recurring: newStatus })
+      .eq('id', template.id);
+
+    setTogglingId(null);
+
+    if (error) {
+      setErrorMsg(`Gagal mengubah status siklus: ${error.message}`);
+    } else {
+      setSuccessMsg(
+        newStatus 
+          ? `Siklus "${template.title}" diaktifkan kembali. Sistem akan memproduksi tugas pada awal periode berikutnya.`
+          : `Siklus "${template.title}" berhasil dihentikan. Pekerjaan ini TIDAK AKAN di-generate otomatis lagi.`
+      );
+      setTemplates(prev => prev.map(t => t.id === template.id ? { ...t, is_recurring: newStatus } : t));
+      setTimeout(() => setSuccessMsg(''), 4500);
+    }
   };
 
   const openEditModal = (template: TemplateItem) => {
@@ -199,16 +254,17 @@ export default function TusiCatalogPage() {
       setErrorMsg(`Gagal memperbarui tusi: ${error.message}`);
     } else {
       setIsEditModalOpen(false);
-      setSuccessMsg('Master Tusi berhasil diperbarui!');
+      setSuccessMsg('Master Tusi klerikal berhasil diperbarui!');
       await fetchTemplates();
       router.refresh();
       setTimeout(() => setSuccessMsg(''), 3500);
     }
   };
 
+  // Hapus Master Tusi Klerikal Permanen
   const handleDeleteTemplate = async (templateId: string, title: string) => {
     const confirmed = window.confirm(
-      `Apakah Anda yakin ingin menghapus master tusi "${title}"?\n\nTindakan ini akan menghapus template ini dari Bank Tusi dan dari pilihan rekam tugas baru.`
+      `HAPUS MASTER PEKERJAAN KLERIKAL?\n\n"${title}"\n\nAkibat penghapusan:\n1. Master pekerjaan ini dihapus dari Bank Tusi.\n2. Sistem TIDAK AKAN PERNAH men-generate tugas ini lagi pada siklus-siklus mendatang.\n\nApakah Anda yakin ingin melanjutkan?`
     );
     if (!confirmed) return;
 
@@ -220,14 +276,13 @@ export default function TusiCatalogPage() {
     if (error) {
       alert(`Gagal menghapus template: ${error.message}`);
     } else {
-      setSuccessMsg(`Master Tusi "${title}" berhasil dihapus.`);
+      setSuccessMsg(`Pekerjaan klerikal "${title}" berhasil dihapus permanen dari sistem.`);
       await fetchTemplates();
       router.refresh();
-      setTimeout(() => setSuccessMsg(''), 3500);
+      setTimeout(() => setSuccessMsg(''), 4000);
     }
   };
 
-  // Utilitas Pembersihan Duplikat Master Tusi Otomatis
   const handleCleanDuplicates = async () => {
     const confirmed = window.confirm(
       'Apakah Anda ingin membersihkan seluruh duplikat Master Tusi?\n\nSistem akan mempertahankan satu master asli yang paling awal dan menghapus salinan tusi ganda yang identik di database.'
@@ -378,10 +433,29 @@ export default function TusiCatalogPage() {
 
     setCloningId(null);
     setSuccessMsg(
-      `Tusi "${template.title}" berhasil dikloning ke unit Anda dan otomatis masuk ke daftar tugas aktif! (Tenggat: ${deadlineStr})`
+      `Tusi "${template.title}" berhasil diadopsi ke unit Anda dan terbit di daftar tugas aktif!`
     );
     setTimeout(() => setSuccessMsg(''), 4500);
   };
+
+  // Perhitungan Jumlah Template Klerikal Aktif vs Nonaktif
+  const recurringStats = useMemo(() => {
+    let activeRecurring = 0;
+    let pausedRecurring = 0;
+    let incidentalCount = 0;
+
+    templates.forEach((t) => {
+      if (t.period_type === 'INSIDENTIL') {
+        incidentalCount++;
+      } else {
+        const isRec = t.is_recurring ?? true;
+        if (isRec) activeRecurring++;
+        else pausedRecurring++;
+      }
+    });
+
+    return { activeRecurring, pausedRecurring, incidentalCount };
+  }, [templates]);
 
   const dynamicTusiList = Array.from(
     new Set(['ALL', userTusiType, ...templates.map((t) => t.tusi_type?.toUpperCase()).filter(Boolean)])
@@ -395,155 +469,300 @@ export default function TusiCatalogPage() {
 
     if (!matchSearch) return false;
 
+    // Filter berdasarkan Satker / Tusi
     if (!isSuperAdmin) {
-      return t.tusi_type?.toUpperCase() === userTusiType.toUpperCase();
+      if (t.tusi_type?.toUpperCase() !== userTusiType.toUpperCase()) return false;
+    } else if (selectedTusi !== 'ALL' && t.tusi_type?.toUpperCase() !== selectedTusi.toUpperCase()) {
+      return false;
     }
 
-    return selectedTusi === 'ALL' || t.tusi_type?.toUpperCase() === selectedTusi.toUpperCase();
+    // Filter berdasarkan Kategori Tab Klerikal
+    const isClerical = t.period_type !== 'INSIDENTIL';
+    const isRec = t.is_recurring ?? isClerical;
+
+    if (activeTab === 'RECURRING_ACTIVE') {
+      return isClerical && isRec;
+    }
+    if (activeTab === 'RECURRING_PAUSED') {
+      return isClerical && !isRec;
+    }
+    if (activeTab === 'INCIDENTAL') {
+      return !isClerical;
+    }
+
+    return true;
   });
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-2 sm:p-4">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Bank Tusi & Katalog Pekerjaan</h1>
-            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-[#DF3B68] border border-rose-200">
-              Seksi {userTusiType}
-            </span>
+      {/* 1. STATUS WIDGET SIKLUS KLERIKAL BERJALAN & CRON GENERATOR */}
+      <div className="bg-white dark:bg-[#1E1E1E] border border-stone-200/80 dark:border-white/[0.08] rounded-3xl p-5 md:p-6 shadow-soft dark:shadow-dark-card space-y-4 transition-colors">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-primary/10 dark:bg-rose-500/10 flex items-center justify-center text-primary dark:text-rose-400 border border-primary/20 dark:border-rose-500/20">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-stone-900 dark:text-white/90">
+                  Status Siklus Pekerjaan Klerikal Aktif
+                </h2>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                  Engine Siap
+                </span>
+              </div>
+              <p className="text-xs text-stone-500 dark:text-white/60 mt-0.5">
+                Periode yang sedang dipantau dan jadwal penerbitan otomatis ke daftar tugas aktif unit.
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-stone-500 mt-1">
-            {!isSuperAdmin 
-              ? `Standar tugas fungsi Seksi ${userTusiType} dari seluruh satker se-wilayah yang dapat Anda adopsi secara instan.`
-              : 'Koleksi master standar tugas fungsi seluruh unit vertikal.'}
-          </p>
+
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            {templates.length > 0 && (
+              <button
+                onClick={handleCleanDuplicates}
+                disabled={isCleaningDuplicates}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-[#242424] hover:bg-stone-100 dark:hover:bg-[#2C2C2C] text-xs font-semibold text-stone-700 dark:text-white/80 transition-all disabled:opacity-50"
+                title="Hapus master tusi yang terduplikasi di database"
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>{isCleaningDuplicates ? 'Membersihkan...' : 'Bersihkan Duplikat'}</span>
+              </button>
+            )}
+
+            <Link
+              href="/tusi-catalog/new"
+              className="inline-flex items-center gap-2 bg-[#DF3B68] hover:bg-[#C72F58] text-white text-xs font-semibold px-4 py-2 rounded-xl shadow-xs transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Master Tusi</span>
+            </Link>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {templates.length > 0 && (
-            <button
-              onClick={handleCleanDuplicates}
-              disabled={isCleaningDuplicates}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-xs font-semibold text-stone-700 shadow-2xs transition-all disabled:opacity-50"
-              title="Hapus master tusi yang terduplikasi di database"
-            >
-              <Layers className="w-3.5 h-3.5 text-amber-600" />
-              <span>{isCleaningDuplicates ? 'Membersihkan...' : 'Bersihkan Duplikat'}</span>
-            </button>
-          )}
+        {/* Baris Status Siklus Real-Time */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-stone-100 dark:border-white/[0.06]">
+          <div className="p-3 rounded-2xl bg-stone-50 dark:bg-[#242424] border border-stone-200/60 dark:border-white/[0.06]">
+            <span className="text-[10px] font-medium text-stone-400 dark:text-white/40 block">Periode Berjalan</span>
+            <span className="text-xs font-bold text-stone-900 dark:text-white/90">
+              {currentPeriodInfo.currentMonthName} {currentPeriodInfo.currentYear}
+            </span>
+            <span className="text-[10px] text-stone-500 dark:text-white/60 block mt-0.5">
+              TW {currentPeriodInfo.currentQuarter} • Sem {currentPeriodInfo.currentSemester}
+            </span>
+          </div>
 
-          <Link
-            href="/tusi-catalog/new"
-            className="inline-flex items-center gap-2 bg-[#DF3B68] text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-sm hover:bg-[#C72F58] transition-all self-start sm:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tambah Master Tusi</span>
-          </Link>
+          <div className="p-3 rounded-2xl bg-stone-50 dark:bg-[#242424] border border-stone-200/60 dark:border-white/[0.06]">
+            <span className="text-[10px] font-medium text-stone-400 dark:text-white/40 block">Jadwal Generate Berikutnya</span>
+            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+              {currentPeriodInfo.nextRunSchedule}
+            </span>
+            <span className="text-[10px] text-stone-500 dark:text-white/60 block mt-0.5">
+              Pukul 00:00 UTC (Awal Bulan)
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-stone-50 dark:bg-[#242424] border border-stone-200/60 dark:border-white/[0.06]">
+            <span className="text-[10px] font-medium text-stone-400 dark:text-white/40 block">Klerikal Auto-Cycle Aktif</span>
+            <span className="text-xs font-bold text-stone-900 dark:text-white/90">
+              {recurringStats.activeRecurring} Pekerjaan
+            </span>
+            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mt-0.5 font-medium">
+              Siap terbit otomatis
+            </span>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-stone-50 dark:bg-[#242424] border border-stone-200/60 dark:border-white/[0.06]">
+            <span className="text-[10px] font-medium text-stone-400 dark:text-white/40 block">Klerikal Dihentikan / Nonaktif</span>
+            <span className="text-xs font-bold text-stone-900 dark:text-white/90">
+              {recurringStats.pausedRecurring} Pekerjaan
+            </span>
+            <span className="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5 font-medium">
+              Siklus dimatikan permanen/pause
+            </span>
+          </div>
         </div>
       </div>
 
       {successMsg && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+        <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-2xl text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+        <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300 rounded-2xl text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Filter & Pencarian Bar */}
-      <div className="bg-white border border-stone-200/70 rounded-3xl p-3 md:p-4 shadow-sm flex flex-col md:flex-row items-center gap-3">
+      {/* 2. TAB NAVIGASI & FILTER KLERIKAL */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-[#1E1E1E] p-2.5 rounded-2xl border border-stone-200/80 dark:border-white/[0.08] shadow-soft dark:shadow-dark-card">
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+          <button
+            onClick={() => setActiveTab('ALL')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'ALL'
+                ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 shadow-xs'
+                : 'text-stone-600 dark:text-white/60 hover:bg-stone-100 dark:hover:bg-[#2C2C2C]'
+            }`}
+          >
+            Semua Master ({templates.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('RECURRING_ACTIVE')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+              activeTab === 'RECURRING_ACTIVE'
+                ? 'bg-[#DF3B68] text-white shadow-xs'
+                : 'text-stone-600 dark:text-white/60 hover:bg-stone-100 dark:hover:bg-[#2C2C2C]'
+            }`}
+          >
+            <RotateCw className="w-3 h-3" />
+            <span>Klerikal Aktif ({recurringStats.activeRecurring})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('RECURRING_PAUSED')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+              activeTab === 'RECURRING_PAUSED'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-stone-600 dark:text-white/60 hover:bg-stone-100 dark:hover:bg-[#2C2C2C]'
+            }`}
+          >
+            <PowerOff className="w-3 h-3" />
+            <span>Klerikal Dihentikan ({recurringStats.pausedRecurring})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('INCIDENTAL')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+              activeTab === 'INCIDENTAL'
+                ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 shadow-xs'
+                : 'text-stone-600 dark:text-white/60 hover:bg-stone-100 dark:hover:bg-[#2C2C2C]'
+            }`}
+          >
+            Insidentil ({recurringStats.incidentalCount})
+          </button>
+        </div>
+
+        {/* Indikator Unit Pengguna */}
+        <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-white/60 self-end sm:self-center pr-2">
+          <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
+          <span>Seksi: <strong>{userTusiType}</strong></span>
+        </div>
+      </div>
+
+      {/* 3. PENCARIAN & FILTER SEKSI */}
+      <div className="bg-white dark:bg-[#1E1E1E] border border-stone-200/70 dark:border-white/[0.08] rounded-3xl p-3 md:p-4 shadow-sm flex flex-col md:flex-row items-center gap-3">
         <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 dark:text-white/40" />
           <input
             type="text"
-            placeholder={`Cari judul pekerjaan atau dasar hukum ${!isSuperAdmin ? `Seksi ${userTusiType}...` : '...'}`}
+            placeholder={`Cari nama pekerjaan klerikal atau dasar hukum...`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
+            className="w-full pl-10 pr-4 py-2 text-xs bg-stone-50/60 dark:bg-[#242424] rounded-xl border border-stone-200 dark:border-white/[0.08] text-stone-900 dark:text-white/90 placeholder:text-stone-400 dark:placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20 focus:border-[#DF3B68]"
           />
         </div>
 
-        {isSuperAdmin ? (
+        {isSuperAdmin && (
           <div className="flex gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
             {dynamicTusiList.map((type) => (
               <button
                 key={type}
                 onClick={() => setSelectedTusi(type)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                  selectedTusi === type ? 'bg-stone-900 text-white shadow-xs' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  selectedTusi === type 
+                    ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 shadow-xs' 
+                    : 'bg-stone-100 dark:bg-[#242424] text-stone-600 dark:text-white/60 hover:bg-stone-200 dark:hover:bg-[#2C2C2C]'
                 }`}
               >
                 {type}
               </button>
             ))}
           </div>
-        ) : (
-          <div className="flex items-center gap-1.5 bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200 text-xs text-stone-600">
-            <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
-            <span>Kategori: <strong>{userTusiType} (Terkunci Sesuai Unit)</strong></span>
-          </div>
         )}
       </div>
 
-      {/* Grid Katalog Template */}
+      {/* 4. GRID KATALOG TEMPLATE KLERIKAL */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {loading ? (
-          <div className="col-span-full bg-white border border-stone-200/60 rounded-3xl p-16 text-center text-xs text-stone-400 shadow-sm">
-            Memuat master bank tusi...
+          <div className="col-span-full bg-white dark:bg-[#1E1E1E] border border-stone-200/60 dark:border-white/[0.08] rounded-3xl p-16 text-center text-xs text-stone-400 dark:text-white/40 shadow-sm">
+            Memuat daftar master pekerjaan klerikal...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="col-span-full bg-white border border-stone-200/60 rounded-3xl p-12 text-center space-y-2 shadow-sm">
-            <ShieldAlert className="w-8 h-8 text-stone-300 mx-auto" />
-            <p className="text-xs font-semibold text-stone-700">
-              Belum ada master tusi untuk kategori {selectedTusi === 'ALL' ? userTusiType : selectedTusi}
+          <div className="col-span-full bg-white dark:bg-[#1E1E1E] border border-stone-200/60 dark:border-white/[0.08] rounded-3xl p-12 text-center space-y-2 shadow-sm">
+            <ShieldAlert className="w-8 h-8 text-stone-300 dark:text-white/20 mx-auto" />
+            <p className="text-xs font-semibold text-stone-700 dark:text-white/80">
+              Tidak ada pekerjaan klerikal pada kriteria filter ini
             </p>
-            <p className="text-[11px] text-stone-400">
-              Klik tombol "+ Tambah Master Tusi" di kanan atas untuk menambahkan standar pekerjaan baru.
+            <p className="text-[11px] text-stone-400 dark:text-white/40">
+              Ubah kata kunci pencarian atau sesuaikan tab kategori klerikal.
             </p>
           </div>
         ) : (
           filtered.map((t) => {
             const hasManageAccess = canManageTemplate(t);
-            const isClerical = t.is_recurring ?? (t.period_type !== 'INSIDENTIL');
+            const isClerical = t.period_type !== 'INSIDENTIL';
+            const isRec = t.is_recurring ?? isClerical;
 
             return (
               <div
                 key={t.id}
-                className="bg-white border border-stone-200/70 rounded-3xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between space-y-4"
+                className={`bg-white dark:bg-[#1E1E1E] border rounded-3xl p-5 shadow-soft dark:shadow-dark-card hover:shadow-md transition-all flex flex-col justify-between space-y-4 ${
+                  !isRec && isClerical 
+                    ? 'border-amber-200/80 dark:border-amber-500/20 bg-amber-50/20 dark:bg-amber-950/10' 
+                    : 'border-stone-200/70 dark:border-white/[0.08]'
+                }`}
               >
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#DF3B68]/10 text-[#DF3B68]">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#DF3B68]/10 text-[#DF3B68] dark:bg-[#DF3B68]/20 dark:text-rose-400">
                         {t.tusi_type}
                       </span>
-                      <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-semibold text-stone-600 dark:text-white/70 bg-stone-100 dark:bg-[#2C2C2C] px-2 py-0.5 rounded-full">
                         {t.period_type}
                       </span>
                       {isClerical ? (
-                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <RotateCw className="w-2.5 h-2.5" /> Auto-Cycle
-                        </span>
+                        isRec ? (
+                          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <RotateCw className="w-2.5 h-2.5" /> Auto-Cycle
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <PowerOff className="w-2.5 h-2.5" /> Siklus Dihentikan
+                          </span>
+                        )
                       ) : (
-                        <span className="text-[10px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-full">
-                          Non-Klerikal
+                        <span className="text-[10px] font-semibold text-stone-500 dark:text-white/50 bg-stone-100 dark:bg-[#2C2C2C] px-2 py-0.5 rounded-full">
+                          Insidentil
                         </span>
                       )}
                     </div>
 
                     {hasManageAccess && (
                       <div className="flex items-center gap-1">
+                        {/* Tombol Cepat Sakelar Siklus Klerikal */}
+                        {isClerical && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRecurring(t)}
+                            disabled={togglingId === t.id}
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              isRec 
+                                ? 'text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50' 
+                                : 'text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/50'
+                            }`}
+                            title={isRec ? 'Hentikan siklus otomatis (Pekerjaan tidak akan muncul lagi)' : 'Aktifkan kembali siklus otomatis'}
+                          >
+                            {isRec ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => openEditModal(t)}
-                          className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors"
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 dark:hover:text-white hover:bg-stone-100 dark:hover:bg-[#2C2C2C] transition-colors"
                           title="Edit Master Tusi"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -551,8 +770,8 @@ export default function TusiCatalogPage() {
                         <button
                           type="button"
                           onClick={() => handleDeleteTemplate(t.id, t.title)}
-                          className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                          title="Hapus Master Tusi"
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
+                          title="Hapus Master Tusi (Permanen)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -560,18 +779,18 @@ export default function TusiCatalogPage() {
                     )}
                   </div>
 
-                  <h3 className="text-sm font-bold text-stone-900 leading-snug">{t.title}</h3>
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-white/90 leading-snug">{t.title}</h3>
                   
                   {t.description && (
-                    <p className="text-xs text-stone-500 line-clamp-2">{t.description}</p>
+                    <p className="text-xs text-stone-500 dark:text-white/60 line-clamp-2">{t.description}</p>
                   )}
                   {t.legal_basis && (
-                    <p className="text-[11px] text-stone-400 italic">Dasar: {t.legal_basis}</p>
+                    <p className="text-[11px] text-stone-400 dark:text-white/40 italic">Dasar: {t.legal_basis}</p>
                   )}
 
                   {t.period_type !== 'INSIDENTIL' && (
-                    <div className="pt-1 flex items-center gap-1 text-[10px] font-medium text-stone-500">
-                      <Clock className="w-3 h-3 text-[#DF3B68]" />
+                    <div className="pt-1 flex items-center gap-1.5 text-[11px] font-medium text-stone-500 dark:text-white/60">
+                      <Clock className="w-3 h-3 text-[#DF3B68] dark:text-rose-400" />
                       <span>
                         {`Batas: ${t.exact_day === 31 ? 'Akhir Bulan' : `Tgl ${t.exact_day}`} (${t.deadline_rule === 'NEXT_MONTH_DATE' ? 'M+1' : t.deadline_rule === 'SAME_MONTH_DATE' ? 'Awal Periode' : 'Akhir Periode'})`}
                       </span>
@@ -579,17 +798,17 @@ export default function TusiCatalogPage() {
                   )}
                 </div>
 
-                <div className="pt-3 border-t border-stone-100 flex items-center justify-between">
-                  <span className="text-[10px] text-stone-400 truncate max-w-[130px]" title={t.unit?.name ?? 'Pusat'}>
+                <div className="pt-3 border-t border-stone-100 dark:border-white/[0.06] flex items-center justify-between">
+                  <span className="text-[10px] text-stone-400 dark:text-white/40 truncate max-w-[130px]" title={t.unit?.name ?? 'Pusat'}>
                     Oleh: {t.unit?.name ?? 'Pusat'}
                   </span>
                   <button
                     onClick={() => handleCloneTask(t)}
                     disabled={cloningId === t.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-900 text-white text-[11px] font-medium hover:bg-stone-800 disabled:opacity-50 transition-colors shadow-2xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-900 hover:bg-stone-800 dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-[11px] font-medium disabled:opacity-50 transition-colors shadow-2xs"
                   >
                     <Copy className="w-3.5 h-3.5" />
-                    {cloningId === t.id ? 'Mengkloning...' : 'Kloning Tugas'}
+                    {cloningId === t.id ? 'Mengadopsi...' : 'Adopsi Tugas'}
                   </button>
                 </div>
               </div>
@@ -598,27 +817,27 @@ export default function TusiCatalogPage() {
         )}
       </div>
 
-      {/* Modal Form Edit Master Tusi */}
+      {/* 5. MODAL FORM EDIT MASTER TUSI KLERIKAL */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-3xl border border-stone-200/80 shadow-2xl p-6 md:p-8 space-y-5">
-            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#1E1E1E] w-full max-w-lg rounded-3xl border border-stone-200/80 dark:border-white/[0.08] shadow-2xl p-6 md:p-8 space-y-5">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/[0.06] pb-3">
               <div className="flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-[#DF3B68]" />
-                <h3 className="font-bold text-stone-900 text-sm md:text-base">
-                  Edit Master Tusi
+                <BookOpen className="w-5 h-5 text-[#DF3B68] dark:text-rose-400" />
+                <h3 className="font-bold text-stone-900 dark:text-white/90 text-sm md:text-base">
+                  Edit Master Tusi Klerikal
                 </h3>
               </div>
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="p-1 rounded-full text-stone-400 hover:bg-stone-100 transition-colors"
+                className="p-1 rounded-full text-stone-400 dark:text-white/40 hover:bg-stone-100 dark:hover:bg-[#2C2C2C] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {errorMsg && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{errorMsg}</span>
               </div>
@@ -634,22 +853,22 @@ export default function TusiCatalogPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1 text-left">
-                  <label className="block text-xs font-semibold text-stone-600">Tipe Tusi *</label>
+                  <label className="block text-xs font-semibold text-stone-600 dark:text-white/70">Tipe Tusi *</label>
                   <input
                     type="text"
                     value={editTusiType}
                     onChange={(e) => setEditTusiType(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 uppercase focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#242424] text-xs text-stone-800 dark:text-white/90 uppercase focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                     required
                   />
                 </div>
 
                 <div className="space-y-1 text-left">
-                  <label className="block text-xs font-semibold text-stone-600">Siklus Periode *</label>
+                  <label className="block text-xs font-semibold text-stone-600 dark:text-white/70">Siklus Periode *</label>
                   <select
                     value={editPeriodType}
                     onChange={(e) => setEditPeriodType(e.target.value as PeriodType)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                    className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#242424] text-xs text-stone-800 dark:text-white/90 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                   >
                     <option value="BULANAN">Bulanan</option>
                     <option value="TRIWULANAN">Triwulanan</option>
@@ -661,10 +880,10 @@ export default function TusiCatalogPage() {
               </div>
 
               {editPeriodType !== 'INSIDENTIL' && (
-                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                <div className="p-3 bg-stone-50 dark:bg-[#242424] rounded-xl border border-stone-200 dark:border-white/[0.08] flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-stone-800 block">Generate Otomatis per Periode (Klerikal):</span>
-                    <span className="text-[11px] text-stone-500">Cron akan membuat tugas baru tiap awal siklus</span>
+                    <span className="text-xs font-bold text-stone-800 dark:text-white/90 block">Auto-Cycle Otomatis Tiap Periode:</span>
+                    <span className="text-[11px] text-stone-500 dark:text-white/60">Pekerjaan ini akan otomatis dibuat oleh sistem pada awal siklus</span>
                   </div>
                   <input
                     type="checkbox"
@@ -676,15 +895,15 @@ export default function TusiCatalogPage() {
               )}
 
               {editPeriodType !== 'INSIDENTIL' && (
-                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
-                  <span className="text-xs font-bold text-stone-800 block">Formula Batas Tenggat Siklus:</span>
+                <div className="p-3.5 bg-stone-50 dark:bg-[#242424] rounded-xl border border-stone-200 dark:border-white/[0.08] space-y-2.5">
+                  <span className="text-xs font-bold text-stone-800 dark:text-white/90 block">Formula Batas Tenggat Siklus:</span>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[10px] text-stone-500 mb-0.5">1. Posisi Bulan:</label>
+                      <label className="block text-[10px] text-stone-500 dark:text-white/50 mb-0.5">1. Posisi Bulan:</label>
                       <select
                         value={editDeadlineRule}
                         onChange={(e) => setEditDeadlineRule(e.target.value)}
-                        className="w-full p-2 rounded-lg border border-stone-200 bg-white text-xs"
+                        className="w-full p-2 rounded-lg border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#1E1E1E] text-stone-800 dark:text-white/90 text-xs"
                       >
                         <option value="NEXT_MONTH_DATE">Bulan Berikutnya (M+1)</option>
                         <option value="END_OF_PERIOD">Bulan Terakhir Periode</option>
@@ -693,7 +912,7 @@ export default function TusiCatalogPage() {
                     </div>
 
                     <div>
-                      <label className="block text-[10px] text-stone-500 mb-0.5">2. Tanggal:</label>
+                      <label className="block text-[10px] text-stone-500 dark:text-white/50 mb-0.5">2. Tanggal:</label>
                       <div className="flex gap-1.5">
                         <select
                           value={editExactDay === 31 ? '31' : [5, 10, 15, 20, 25].includes(editExactDay) ? String(editExactDay) : 'CUSTOM'}
@@ -707,7 +926,7 @@ export default function TusiCatalogPage() {
                               setEditCustomDayInput(String(val));
                             }
                           }}
-                          className="w-1/2 p-2 rounded-lg border border-stone-200 bg-white text-xs"
+                          className="w-1/2 p-2 rounded-lg border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#1E1E1E] text-stone-800 dark:text-white/90 text-xs"
                         >
                           <option value="31">Akhir Bulan</option>
                           <option value="5">Tgl 5</option>
@@ -728,7 +947,7 @@ export default function TusiCatalogPage() {
                             const val = Number(e.target.value);
                             if (val >= 1 && val <= 31) setEditExactDay(val);
                           }}
-                          className="w-1/2 p-2 rounded-lg border border-stone-200 bg-white text-xs font-mono text-center"
+                          className="w-1/2 p-2 rounded-lg border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#1E1E1E] text-stone-800 dark:text-white/90 text-xs font-mono text-center"
                         />
                       </div>
                     </div>
@@ -737,26 +956,26 @@ export default function TusiCatalogPage() {
               )}
 
               <div className="space-y-1 text-left">
-                <label className="block text-xs font-semibold text-stone-600">Dasar Hukum (Opsional)</label>
+                <label className="block text-xs font-semibold text-stone-600 dark:text-white/70">Dasar Hukum (Opsional)</label>
                 <input
                   type="text"
                   value={editLegalBasis}
                   onChange={(e) => setEditLegalBasis(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#242424] text-xs text-stone-800 dark:text-white/90 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
 
               <div className="space-y-1 text-left">
-                <label className="block text-xs font-semibold text-stone-600">Deskripsi / Prosedur (Opsional)</label>
+                <label className="block text-xs font-semibold text-stone-600 dark:text-white/70">Deskripsi / Prosedur (Opsional)</label>
                 <textarea
                   rows={3}
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full p-3 rounded-xl border border-stone-200 bg-white text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
+                  className="w-full p-3 rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#242424] text-xs text-stone-800 dark:text-white/90 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/20"
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-stone-100">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-stone-100 dark:border-white/[0.06]">
                 <Button
                   type="button"
                   variant="outline"
