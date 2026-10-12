@@ -50,6 +50,7 @@ export default function DashboardPage() {
     completed: 0,
     inProgress: 0,
     critical: 0,
+    sectionAggregateProgress: 0, // Nilai agregat seluruh progres seksi
   });
 
   const [urgentTasks, setUrgentTasks] = useState<Task[]>([]);
@@ -159,20 +160,24 @@ export default function DashboardPage() {
       );
 
       const completed = combinedTasks.filter((t) => t.status === 'SELESAI').length;
-      const inProgress = combinedTasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const inProgress = combinedTasks.filter((t) => t.status === 'ON_PROGRESS' || (t.progress_pct > 0 && t.status !== 'SELESAI')).length;
       const critical = combinedTasks.filter(
         (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
       );
+
+      const totalProgressSum = combinedTasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+      const aggregateProgress = combinedTasks.length > 0 ? Math.round(totalProgressSum / combinedTasks.length) : 0;
 
       setMetrics({
         total: combinedTasks.length,
         completed,
         inProgress,
         critical: critical.length,
+        sectionAggregateProgress: aggregateProgress,
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
     }
-    // 2. PERSPEKTIF KEPALA SEKSI
+    // 2. PERSPEKTIF KEPALA SEKSI (DENGAN KALKULASI PROGRES SUBTASKS & DISTRIBUSI REALISTIS)
     else if (perspective === 'KEPALA_SEKSI') {
       const { data: tasks } = await supabase
         .from('tasks')
@@ -182,16 +187,21 @@ export default function DashboardPage() {
 
       const allTasks = tasks || [];
       const completed = allTasks.filter((t) => t.status === 'SELESAI').length;
-      const inProgress = allTasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const inProgress = allTasks.filter((t) => t.status === 'ON_PROGRESS' || (t.progress_pct > 0 && t.status !== 'SELESAI')).length;
       const critical = allTasks.filter(
         (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
       );
+
+      // Kalkulasi Rata-rata Progres Holistik Seksi (Termasuk pekerjaan yang baru dicicil sub-tugasnya)
+      const totalProgressSum = allTasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+      const aggregateProgress = allTasks.length > 0 ? Math.round(totalProgressSum / allTasks.length) : 0;
 
       setMetrics({
         total: allTasks.length,
         completed,
         inProgress,
         critical: critical.length,
+        sectionAggregateProgress: aggregateProgress,
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
@@ -202,14 +212,57 @@ export default function DashboardPage() {
           .select('task_id, profile:profiles(full_name)')
           .in('task_id', taskIds);
 
-        const staffMap = new Map<string, { name: string; completed: number; total: number }>();
+        // Ambil juga daftar seluruh pegawai di seksi ini agar yang belum ditugaskan tetap terdata
+        const { data: sectionStaffs } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('unit_id', targetUnitId);
+
+        const staffMap = new Map<string, { 
+          name: string; 
+          completed: number; 
+          inProgress: number;
+          total: number; 
+          totalProgress: number; 
+          percentage: number; 
+        }>();
+
+        // Daftarkan semua staf aktif seksi
+        (sectionStaffs || []).forEach((st) => {
+          if (st.full_name) {
+            staffMap.set(st.full_name, { 
+              name: st.full_name, 
+              completed: 0, 
+              inProgress: 0,
+              total: 0, 
+              totalProgress: 0, 
+              percentage: 0 
+            });
+          }
+        });
+
+        // Hitung progres riil berdasarkan tugas yang ditangani (termasuk persentase parsial)
         (pics || []).forEach((p: any) => {
           const name = p.profile?.full_name || 'Staf';
           const related = allTasks.find((t) => t.id === p.task_id);
-          if (!staffMap.has(name)) staffMap.set(name, { name, completed: 0, total: 0 });
+          if (!staffMap.has(name)) {
+            staffMap.set(name, { name, completed: 0, inProgress: 0, total: 0, totalProgress: 0, percentage: 0 });
+          }
           const item = staffMap.get(name)!;
           item.total++;
-          if (related?.status === 'SELESAI') item.completed++;
+          const taskProg = Number(related?.progress_pct || 0);
+          item.totalProgress += taskProg;
+
+          if (related?.status === 'SELESAI' || taskProg === 100) {
+            item.completed++;
+          } else if (related?.status === 'ON_PROGRESS' || taskProg > 0) {
+            item.inProgress++;
+          }
+        });
+
+        // Finalisasi persentase distribusi beban kerja pegawai
+        staffMap.forEach((item) => {
+          item.percentage = item.total > 0 ? Math.round(item.totalProgress / item.total) : 0;
         });
 
         setWorkloadData(Array.from(staffMap.values()).sort((a, b) => b.total - a.total));
@@ -236,16 +289,20 @@ export default function DashboardPage() {
 
       const tasks = allTasks || [];
       const completed = tasks.filter((t) => t.status === 'SELESAI').length;
-      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS' || (t.progress_pct > 0 && t.status !== 'SELESAI')).length;
       const critical = tasks.filter(
         (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
       );
+
+      const totalProgressSum = tasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+      const aggregateProgress = tasks.length > 0 ? Math.round(totalProgressSum / tasks.length) : 0;
 
       setMetrics({
         total: tasks.length,
         completed,
         inProgress,
         critical: critical.length,
+        sectionAggregateProgress: aggregateProgress,
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
@@ -256,7 +313,8 @@ export default function DashboardPage() {
           const uCrit = uTasks.filter(
             (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
           ).length;
-          const pct = uTasks.length > 0 ? Math.round((uDone / uTasks.length) * 100) : 0;
+          const uSumProgress = uTasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+          const pct = uTasks.length > 0 ? Math.round(uSumProgress / uTasks.length) : 0;
           return {
             id: u.id,
             name: u.name,
@@ -278,16 +336,20 @@ export default function DashboardPage() {
 
       const tasks = allTasks || [];
       const completed = tasks.filter((t) => t.status === 'SELESAI').length;
-      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS').length;
+      const inProgress = tasks.filter((t) => t.status === 'ON_PROGRESS' || (t.progress_pct > 0 && t.status !== 'SELESAI')).length;
       const critical = tasks.filter(
         (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
       );
+
+      const totalProgressSum = tasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+      const aggregateProgress = tasks.length > 0 ? Math.round(totalProgressSum / tasks.length) : 0;
 
       setMetrics({
         total: tasks.length,
         completed,
         inProgress,
         critical: critical.length,
+        sectionAggregateProgress: aggregateProgress,
       });
       setUrgentTasks(critical.slice(0, 5) as Task[]);
 
@@ -315,7 +377,8 @@ export default function DashboardPage() {
           const crit = assignedTasks.filter(
             (t) => t.status === 'TERKENDALA' || (t.status !== 'SELESAI' && t.deadline <= threeDaysLater)
           ).length;
-          const pct = assignedTasks.length > 0 ? Math.round((done / assignedTasks.length) * 100) : 0;
+          const assignedSumProgress = assignedTasks.reduce((sum, t) => sum + (t.progress_pct || 0), 0);
+          const pct = assignedTasks.length > 0 ? Math.round(assignedSumProgress / assignedTasks.length) : 0;
 
           return {
             id: e3.id,
@@ -399,17 +462,17 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-stone-900 tracking-tight">
+            <h1 className="text-xl font-bold text-stone-900 dark:text-white/90 tracking-tight">
               {activePerspective === 'STAF' && 'Dashboard Kerja Saya'}
               {activePerspective === 'KEPALA_SEKSI' && 'Supervisory Cockpit Seksi'}
               {activePerspective === 'KEPALA_UNIT' && 'Executive Health Scorecard'}
               {activePerspective === 'KEPALA_KANWIL' && 'Regional Command Center Kanwil'}
             </h1>
-            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#DF3B68]/10 text-[#DF3B68] border border-[#DF3B68]/20">
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-[#DF3B68]/10 text-[#DF3B68] dark:bg-[#DF3B68]/20 dark:text-rose-400 border border-[#DF3B68]/20 dark:border-[#DF3B68]/30">
               {activePerspective}
             </span>
           </div>
-          <p className="text-xs text-stone-500 mt-0.5">
+          <p className="text-xs text-stone-500 dark:text-white/60 mt-0.5">
             {activePerspective === 'STAF' && 'Pantau dan eksekusi tugas serta sub-tugas yang ditugaskan kepada Anda atau unit Anda.'}
             {activePerspective === 'KEPALA_SEKSI' && 'Monitoring progres capaian seksi, beban kerja staf, dan mitigasi kendala.'}
             {activePerspective === 'KEPALA_UNIT' && 'Evaluasi kesehatan kinerja antar-seksi dan deteksi titik kritis kantor.'}
@@ -419,7 +482,7 @@ export default function DashboardPage() {
 
         <button
           onClick={() => loadPerspectiveData(activePerspective, simulatedUnitId || userUnit?.id)}
-          className="p-2 rounded-full border border-stone-200 bg-white hover:bg-stone-50 text-stone-500 transition-colors self-start sm:self-center"
+          className="p-2 rounded-full border border-stone-200 dark:border-white/[0.08] bg-white dark:bg-[#1E1E1E] hover:bg-stone-50 dark:hover:bg-[#242424] text-stone-500 dark:text-white/70 transition-colors self-start sm:self-center shadow-xs"
           title="Segarkan Data"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#DF3B68]' : ''}`} />
@@ -477,22 +540,37 @@ export default function DashboardPage() {
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <WorkloadCard data={workloadData} />
-            <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft flex flex-col justify-between">
+            <div className="bg-white dark:bg-[#1E1E1E] border border-stone-200/60 dark:border-white/[0.08] rounded-3xl p-6 shadow-soft dark:shadow-dark-card flex flex-col justify-between transition-colors">
               <div>
-                <h4 className="text-sm font-bold text-stone-900">Indeks Kepatuhan Seksi</h4>
-                <p className="text-xs text-stone-500 mt-1">Rasio penyelesaian tugas tepat waktu pada periode aktif.</p>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-stone-900 dark:text-white/90">Indeks Kepatuhan Seksi</h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                    Progres Riil
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 dark:text-white/60 mt-1">
+                  Rasio agregat penyelesaian tugas & tahapan sub-pekerjaan periode aktif.
+                </p>
               </div>
+
               <div className="py-6 text-center">
-                <p className="text-5xl font-black text-[#DF3B68]">
-                  {metrics.total > 0 ? Math.round((metrics.completed / metrics.total) * 100) : 0}%
+                <p className="text-5xl font-black text-[#DF3B68] dark:text-rose-500 tracking-tight">
+                  {metrics.sectionAggregateProgress}%
                 </p>
-                <p className="text-xs text-stone-400 mt-2 font-medium">
-                  {metrics.completed} dari {metrics.total} tugas telah tuntas
+                <div className="w-full max-w-xs mx-auto bg-stone-100 dark:bg-[#2C2C2C] h-2 rounded-full mt-3 overflow-hidden">
+                  <div 
+                    className="h-full bg-[#DF3B68] dark:bg-rose-500 rounded-full transition-all duration-500"
+                    style={{ width: `${metrics.sectionAggregateProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-stone-500 dark:text-white/60 mt-2.5 font-medium">
+                  {metrics.completed} tuntas penuh • {metrics.inProgress} on-progress dari {metrics.total} tugas
                 </p>
               </div>
+
               <Link 
                 href="/tasks/new" 
-                className="w-full py-2 bg-stone-900 text-white rounded-xl text-xs font-semibold text-center hover:bg-stone-800 transition-colors"
+                className="w-full py-2.5 bg-stone-900 hover:bg-stone-800 dark:bg-[#DF3B68] dark:hover:bg-[#C72F58] text-white rounded-xl text-xs font-semibold text-center transition-all shadow-xs"
               >
                 + Beri Penugasan Baru
               </Link>
@@ -508,38 +586,38 @@ export default function DashboardPage() {
       {/* PERSPEKTIF 3: KEPALA KANTOR */}
       {activePerspective === 'KEPALA_UNIT' && (
         <div className="space-y-6">
-          <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
+          <div className="bg-white dark:bg-[#1E1E1E] border border-stone-200/60 dark:border-white/[0.08] rounded-3xl p-6 shadow-soft dark:shadow-dark-card space-y-4 transition-colors">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-bold text-stone-900">Matriks Kesehatan Kinerja Antar-Seksi</h4>
-                <p className="text-xs text-stone-500">Komparasi capaian tusi dan titik kritis per unit kerja.</p>
+                <h4 className="text-sm font-bold text-stone-900 dark:text-white/90">Matriks Kesehatan Kinerja Antar-Seksi</h4>
+                <p className="text-xs text-stone-500 dark:text-white/60">Komparasi capaian tusi dan titik kritis per unit kerja.</p>
               </div>
-              <Building2 className="w-4 h-4 text-stone-400" />
+              <Building2 className="w-4 h-4 text-stone-400 dark:text-white/40" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
               {sectionMatrix.map((sec) => (
-                <div key={sec.id} className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                <div key={sec.id} className="p-4 rounded-2xl bg-stone-50 dark:bg-[#242424] border border-stone-200/80 dark:border-white/[0.08] space-y-3">
                   <div className="flex justify-between items-start">
-                    <p className="text-xs font-bold text-stone-900 leading-snug line-clamp-2">{sec.name}</p>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white/90 leading-snug line-clamp-2">{sec.name}</p>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      sec.percentage >= 80 ? 'bg-emerald-100 text-emerald-800' :
-                      sec.percentage >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                      sec.percentage >= 80 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400' :
+                      sec.percentage >= 50 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400' : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400'
                     }`}>
                       {sec.percentage}%
                     </span>
                   </div>
                   
-                  <div className="flex items-center justify-between text-xs text-stone-600 font-medium">
+                  <div className="flex items-center justify-between text-xs text-stone-600 dark:text-white/70 font-medium">
                     <span>{sec.completed}/{sec.total} Selesai</span>
                     {sec.critical > 0 ? (
-                      <span className="text-rose-600 font-bold">{sec.critical} Kritis</span>
+                      <span className="text-rose-600 dark:text-rose-400 font-bold">{sec.critical} Kritis</span>
                     ) : (
-                      <span className="text-emerald-600">Nihil Kendala</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">Nihil Kendala</span>
                     )}
                   </div>
 
-                  <div className="w-full bg-stone-200 h-1.5 rounded-full overflow-hidden">
+                  <div className="w-full bg-stone-200 dark:bg-[#2C2C2C] h-1.5 rounded-full overflow-hidden">
                     <div 
                       className={`h-full ${sec.percentage >= 80 ? 'bg-emerald-500' : sec.percentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
                       style={{ width: `${sec.percentage}%` }}
@@ -560,40 +638,40 @@ export default function DashboardPage() {
       {/* PERSPEKTIF 4: KEPALA KANWIL */}
       {activePerspective === 'KEPALA_KANWIL' && (
         <div className="space-y-6">
-          <div className="bg-white border border-stone-200/60 rounded-3xl p-6 shadow-soft space-y-4">
+          <div className="bg-white dark:bg-[#1E1E1E] border border-stone-200/60 dark:border-white/[0.08] rounded-3xl p-6 shadow-soft dark:shadow-dark-card space-y-4 transition-colors">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-bold text-stone-900">Leaderboard Kepatuhan KPPN & Bidang se-Jawa Tengah</h4>
-                <p className="text-xs text-stone-500">Peringkat kepatuhan dan kecepatan penyelesaian tusi regional.</p>
+                <h4 className="text-sm font-bold text-stone-900 dark:text-white/90">Leaderboard Kepatuhan KPPN & Bidang se-Jawa Tengah</h4>
+                <p className="text-xs text-stone-500 dark:text-white/60">Peringkat kepatuhan dan kecepatan penyelesaian tusi regional.</p>
               </div>
-              <TrendingUp className="w-4 h-4 text-[#DF3B68]" />
+              <TrendingUp className="w-4 h-4 text-[#DF3B68] dark:text-rose-500" />
             </div>
 
-            <div className="divide-y divide-stone-100">
+            <div className="divide-y divide-stone-100 dark:divide-white/[0.06]">
               {regionalLeaderboard.map((unit, index) => (
-                <div key={unit.id} className="py-3.5 flex items-center justify-between gap-4 hover:bg-stone-50/60 px-2 rounded-xl transition-colors">
+                <div key={unit.id} className="py-3.5 flex items-center justify-between gap-4 hover:bg-stone-50/60 dark:hover:bg-[#242424]/60 px-2 rounded-xl transition-colors">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      index === 0 ? 'bg-amber-100 text-amber-800' :
-                      index === 1 ? 'bg-stone-200 text-stone-800' :
-                      index === 2 ? 'bg-orange-100 text-orange-800' : 'text-stone-400'
+                      index === 0 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400' :
+                      index === 1 ? 'bg-stone-200 text-stone-800 dark:bg-stone-800 dark:text-stone-300' :
+                      index === 2 ? 'bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-400' : 'text-stone-400 dark:text-white/40'
                     }`}>
                       {index + 1}
                     </span>
                     <div className="truncate">
-                      <p className="text-xs font-bold text-stone-900 truncate">{unit.name}</p>
-                      <p className="text-[11px] text-stone-500">{unit.completed} dari {unit.total} tugas tuntas ({unit.critical} kritis)</p>
+                      <p className="text-xs font-bold text-stone-900 dark:text-white/90 truncate">{unit.name}</p>
+                      <p className="text-[11px] text-stone-500 dark:text-white/60">{unit.completed} dari {unit.total} tugas tuntas ({unit.critical} kritis)</p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <div className="w-24 bg-stone-100 h-2 rounded-full overflow-hidden hidden sm:block">
+                    <div className="w-24 bg-stone-100 dark:bg-[#2C2C2C] h-2 rounded-full overflow-hidden hidden sm:block">
                       <div 
                         className={`h-full ${unit.percentage >= 80 ? 'bg-emerald-500' : unit.percentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
                         style={{ width: `${unit.percentage}%` }}
                       />
                     </div>
-                    <span className="text-xs font-bold text-stone-900 w-12 text-right">{unit.percentage}%</span>
+                    <span className="text-xs font-bold text-stone-900 dark:text-white/90 w-12 text-right">{unit.percentage}%</span>
                   </div>
                 </div>
               ))}
