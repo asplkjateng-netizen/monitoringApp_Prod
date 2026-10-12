@@ -171,7 +171,7 @@ function ReportsContent() {
     }
   });
 
-  // Fungsi Ekspor CSV Kompatibel Microsoft Excel (UTF-8 BOM)
+  // Ekspor CSV Kompatibel Microsoft Excel (UTF-8 BOM)
   const exportToCSV = () => {
     const headers = [
       'No',
@@ -224,11 +224,13 @@ function ReportsContent() {
 
   return (
     <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Header Halaman (Disembunyikan saat cetak) */}
+      {/* Header Halaman */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-bold text-stone-900 tracking-tight">Laporan & Riwayat Kinerja</h1>
-          <p className="text-sm text-stone-500 mt-1">
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-slate-100 tracking-tight">
+            Laporan & Riwayat Kinerja
+          </h1>
+          <p className="text-sm text-stone-500 dark:text-slate-400 mt-1">
             Rekapitulasi komprehensif tugas berjalan dan arsip historis {unitInfo ? `(${unitInfo.name})` : ''}.
           </p>
         </div>
@@ -241,14 +243,14 @@ function ReportsContent() {
           </button>
           <button
             onClick={handlePrint}
-            className="inline-flex items-center gap-2 bg-stone-800 hover:bg-stone-900 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 bg-stone-800 hover:bg-stone-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors shadow-sm"
           >
             <Printer className="w-4 h-4" /> Cetak Laporan (PDF)
           </button>
         </div>
       </div>
 
-      {/* KOP RESMI LAPORAN (HANYA MUNCUL SAAT DICETAK) */}
+      {/* KOP RESMI LAPORAN (HANYA MUNCUL SAAT CETAK) */}
       <div className="hidden print:block text-center border-b-2 border-stone-800 pb-4 mb-6">
         <h2 className="text-base font-bold uppercase tracking-wider">KEMENTERIAN KEUANGAN REPUBLIK INDONESIA</h2>
         <h3 className="text-sm font-semibold uppercase">{unitInfo?.name || 'DIREKTORAT JENDERAL PERBENDAHARAAN'}</h3>
@@ -257,40 +259,40 @@ function ReportsContent() {
         </p>
       </div>
 
-      {/* Ringkasan Metrik (Disembunyikan saat cetak) */}
+      {/* Ringkasan Metrik (Bebas Blok Putih) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 print:hidden">
-        <div className="bg-white p-4 rounded-2xl border border-stone-200/70 shadow-sm">
-          <p className="text-xs font-semibold text-stone-400">TOTAL TUGAS TEREKAM</p>
-          <p className="text-2xl font-bold text-stone-900 mt-1">{totalTasks}</p>
+        <div className="bg-white dark:bg-[#131B26] p-4 rounded-2xl border border-stone-200/80 dark:border-white/10 shadow-sm transition-colors">
+          <p className="text-xs font-semibold text-stone-400 dark:text-slate-400 tracking-wider">TOTAL TUGAS TEREKAM</p>
+          <p className="text-2xl font-bold text-stone-900 dark:text-slate-100 mt-1">{totalTasks}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-stone-200/70 shadow-sm">
-          <p className="text-xs font-semibold text-stone-400">TOTAL TUNTAS (SELESAI / ARSIP)</p>
-          <p className="text-2xl font-bold text-emerald-600 mt-1">{completedTasks}</p>
+        <div className="bg-white dark:bg-[#131B26] p-4 rounded-2xl border border-stone-200/80 dark:border-white/10 shadow-sm transition-colors">
+          <p className="text-xs font-semibold text-stone-400 dark:text-slate-400 tracking-wider">TOTAL TUNTAS (SELESAI / ARSIP)</p>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{completedTasks}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-stone-200/70 shadow-sm">
-          <p className="text-xs font-semibold text-stone-400">TINGKAT KEPATUHAN PENYELESAIAN</p>
-          <p className="text-2xl font-bold text-primary mt-1">{complianceRate}%</p>
+        <div className="bg-white dark:bg-[#131B26] p-4 rounded-2xl border border-stone-200/80 dark:border-white/10 shadow-sm transition-colors">
+          <p className="text-xs font-semibold text-stone-400 dark:text-slate-400 tracking-wider">TINGKAT KEPATUHAN PENYELESAIAN</p>
+          <p className="text-2xl font-bold text-primary dark:text-rose-400 mt-1">{complianceRate}%</p>
         </div>
       </div>
 
-      {/* Filter Bar (Disembunyikan saat cetak) */}
-      <div className="bg-white p-4 rounded-2xl border border-stone-200/70 shadow-sm space-y-3 print:hidden">
+      {/* Filter Bar (Dark Mode Elegan) */}
+      <div className="bg-white dark:bg-[#131B26] p-4 rounded-2xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-3 print:hidden transition-colors">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="relative">
-            <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-stone-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Cari tugas / dasar hukum / PIC..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 dark:bg-[#1A2332] rounded-xl border border-stone-200 dark:border-white/10 text-stone-900 dark:text-slate-100 placeholder:text-stone-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
 
           <select
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className="px-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 text-stone-700"
+            className="px-3 py-2 text-xs bg-stone-50 dark:bg-[#1A2332] rounded-xl border border-stone-200 dark:border-white/10 text-stone-700 dark:text-slate-200 focus:outline-none"
           >
             {[0, 1, 2].map((offset) => {
               const y = new Date().getFullYear() - offset;
@@ -301,7 +303,7 @@ function ReportsContent() {
           <select
             value={selectedPeriod}
             onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="px-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 text-stone-700"
+            className="px-3 py-2 text-xs bg-stone-50 dark:bg-[#1A2332] rounded-xl border border-stone-200 dark:border-white/10 text-stone-700 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Semua Siklus</option>
             <option value="TW_1">Triwulan I</option>
@@ -316,7 +318,7 @@ function ReportsContent() {
           <select
             value={sourceFilter}
             onChange={(e) => setSourceFilter(e.target.value as any)}
-            className="px-3 py-2 text-xs bg-stone-50 rounded-xl border border-stone-200 text-stone-700"
+            className="px-3 py-2 text-xs bg-stone-50 dark:bg-[#1A2332] rounded-xl border border-stone-200 dark:border-white/10 text-stone-700 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Semua Data (Aktif + Arsip)</option>
             <option value="ACTIVE">Tugas Berjalan Saja</option>
@@ -326,17 +328,17 @@ function ReportsContent() {
       </div>
 
       {/* Tabel Laporan & History */}
-      <div className="bg-white rounded-3xl border border-stone-200/70 shadow-sm overflow-hidden print:border-none print:shadow-none">
+      <div className="bg-white dark:bg-[#131B26] rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm overflow-hidden print:border-none print:shadow-none print:bg-transparent transition-colors">
         {loading ? (
-          <div className="py-20 text-center text-xs text-stone-400">Memuat laporan rekapitulasi...</div>
+          <div className="py-20 text-center text-xs text-stone-400 dark:text-slate-500">Memuat laporan rekapitulasi...</div>
         ) : filteredData.length === 0 ? (
-          <div className="py-20 text-center text-xs text-stone-400">
+          <div className="py-20 text-center text-xs text-stone-400 dark:text-slate-500">
             Tidak ada riwayat pekerjaan ditemukan untuk parameter filter ini.
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-stone-700 border-collapse">
-              <thead className="bg-stone-50 text-stone-500 font-semibold border-b border-stone-200 uppercase tracking-wider text-[10px]">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-stone-50 dark:bg-[#1A2332]/70 text-stone-500 dark:text-slate-400 font-semibold border-b border-stone-200 dark:border-white/10 uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="p-3.5 text-center w-10">No</th>
                   <th className="p-3.5 min-w-[200px]">Uraian Tugas & Dasar Hukum</th>
@@ -348,32 +350,32 @@ function ReportsContent() {
                   <th className="p-3.5 text-center">Sumber</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-stone-100">
+              <tbody className="divide-y divide-stone-100 dark:divide-white/5">
                 {filteredData.map((item, index) => (
-                  <tr key={item.id} className="hover:bg-stone-50/50 transition-colors">
-                    <td className="p-3.5 text-center text-stone-400 font-medium">{index + 1}</td>
+                  <tr key={item.id} className="hover:bg-stone-50/60 dark:hover:bg-[#1A2332]/50 transition-colors">
+                    <td className="p-3.5 text-center text-stone-400 dark:text-slate-500 font-medium">{index + 1}</td>
                     <td className="p-3.5">
-                      <p className="font-semibold text-stone-900">{item.title}</p>
+                      <p className="font-semibold text-stone-900 dark:text-slate-100">{item.title}</p>
                       {item.legal_basis && (
-                        <p className="text-[11px] text-stone-400 mt-0.5">{item.legal_basis}</p>
+                        <p className="text-[11px] text-stone-400 dark:text-slate-400 mt-0.5">{item.legal_basis}</p>
                       )}
                     </td>
-                    <td className="p-3.5 whitespace-nowrap font-medium text-stone-600">
+                    <td className="p-3.5 whitespace-nowrap font-medium text-stone-600 dark:text-slate-300">
                       {item.period_type}
                     </td>
-                    <td className="p-3.5 whitespace-nowrap text-stone-600">
+                    <td className="p-3.5 whitespace-nowrap text-stone-600 dark:text-slate-300">
                       {item.deadline}
                     </td>
-                    <td className="p-3.5 text-stone-600">
+                    <td className="p-3.5 text-stone-600 dark:text-slate-300">
                       {item.pics_names}
                     </td>
                     <td className="p-3.5 text-center whitespace-nowrap">
                       {item.status.includes('SELESAI') ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50">
                           <CheckCircle2 className="w-3 h-3" /> Selesai
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 text-stone-700 border border-stone-200">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold bg-stone-100 dark:bg-[#1E293B] text-stone-700 dark:text-slate-300 border border-stone-200 dark:border-white/10">
                           {item.status} ({item.progress_pct}%)
                         </span>
                       )}
@@ -384,22 +386,22 @@ function ReportsContent() {
                           href={item.evidence_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-primary dark:text-rose-400 bg-primary/10 dark:bg-rose-500/10 hover:bg-primary/20 dark:hover:bg-rose-500/20 transition-colors"
                         >
                           Lihat Bukti
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       ) : (
-                        <span className="text-stone-300">-</span>
+                        <span className="text-stone-300 dark:text-slate-600">-</span>
                       )}
                     </td>
                     <td className="p-3.5 text-center whitespace-nowrap">
                       {item.source === 'ARCHIVE' ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800/50">
                           <Archive className="w-3 h-3" /> Arsip
                         </span>
                       ) : (
-                        <span className="text-[10px] font-semibold text-stone-500 bg-stone-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold text-stone-500 dark:text-slate-400 bg-stone-100 dark:bg-[#1E293B] px-2 py-0.5 rounded-full border border-stone-200/50 dark:border-white/5">
                           Aktif
                         </span>
                       )}
@@ -412,7 +414,7 @@ function ReportsContent() {
         )}
       </div>
 
-      {/* LEMBAR PENGESAHAN LAPORAN (HANYA MUNCUL SAAT CETAK PDF) */}
+      {/* LEMBAR PENGESAHAN LAPORAN (CETAK PDF) */}
       <div className="hidden print:grid grid-cols-2 gap-8 pt-10 mt-6 border-t border-stone-300 text-xs">
         <div className="text-center">
           <p className="font-semibold text-stone-600">Mengetahui,</p>
@@ -422,7 +424,9 @@ function ReportsContent() {
           <p className="text-stone-500">NIP. ..................................................</p>
         </div>
         <div className="text-center">
-          <p className="font-semibold text-stone-600">Semarang, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <p className="font-semibold text-stone-600">
+            Semarang, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
           <p className="font-bold text-stone-900 mt-0.5">Penanggung Jawab Kepatuhan Internal</p>
           <div className="h-16" />
           <p className="font-bold underline text-stone-900">( .................................................. )</p>
@@ -435,7 +439,7 @@ function ReportsContent() {
 
 export default function ReportsPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-xs text-stone-400">Memuat laporan...</div>}>
+    <Suspense fallback={<div className="py-20 text-center text-xs text-stone-400 dark:text-slate-500">Memuat laporan...</div>}>
       <ReportsContent />
     </Suspense>
   );
