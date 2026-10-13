@@ -20,7 +20,7 @@ import {
   Calendar,
   Info, 
   BookOpen, 
-  Share2,
+  Share2, 
   Wrench, 
   ListCollapse,
   ArrowUp,
@@ -28,7 +28,8 @@ import {
   Check,
   X,
   Edit2,
-  Download
+  Download,
+  RotateCw
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { TaskShareModal } from '@/components/tasks/task-share-modal';
@@ -266,6 +267,14 @@ export default function TaskDetailPage() {
     }
   }, [taskId]);
 
+  // Helper untuk memperbarui timestamp tugas induk agar selalu terdeteksi sebagai versi paling mutakhir
+  const touchTaskUpdatedAt = async () => {
+    await supabase
+      .from('tasks')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', taskId);
+  };
+
   const loadTaskDetails = async () => {
     setLoading(true);
     setErrorMsg('');
@@ -333,7 +342,6 @@ export default function TaskDetailPage() {
     setLoading(false);
   };
 
-  // Hitung ulang deadline nilai maksimal jika batas regulasi diganti manual
   const handleDeadlineChange = (newDeadlineVal: string) => {
     setCurrentDeadline(newDeadlineVal);
     if (task?.max_score_days_before && task.max_score_days_before > 0 && newDeadlineVal) {
@@ -452,6 +460,7 @@ export default function TaskDetailPage() {
     await loadTaskDetails();
   };
 
+  // TAMBAH SUBTASK BARU + UPDATE TIMESTAMP INDUK
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtaskTitle.trim()) return;
@@ -489,6 +498,9 @@ export default function TaskDetailPage() {
         });
       }
 
+      // Kunci: Pastikan task induk ter-update timestamp-nya
+      await touchTaskUpdatedAt();
+
       setNewSubtaskTitle('');
       setNewSubtaskDeadline('');
       setNewSubtaskPicId('');
@@ -497,6 +509,7 @@ export default function TaskDetailPage() {
     setAddingSubtask(false);
   };
 
+  // UBAH URUTAN SUBTASK (REORDER) + UPDATE TIMESTAMP INDUK
   const handleMoveSubtask = async (index: number, direction: 'UP' | 'DOWN') => {
     const targetIndex = direction === 'UP' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= subtasks.length) return;
@@ -517,6 +530,8 @@ export default function TaskDetailPage() {
         supabase.from('subtasks').update({ order_index: targetOrder }).eq('id', currentItem.id),
         supabase.from('subtasks').update({ order_index: currentOrder }).eq('id', targetItem.id),
       ]);
+      // Kunci: Update timestamp task induk
+      await touchTaskUpdatedAt();
     } catch (err: any) {
       setErrorMsg('Gagal memperbarui urutan tahapan: ' + err.message);
       loadTaskDetails();
@@ -535,6 +550,7 @@ export default function TaskDetailPage() {
     setEditDeadlineInput('');
   };
 
+  // SIMPAN EDIT TEXT / DEADLINE SUBTASK + UPDATE TIMESTAMP INDUK
   const saveEditSubtask = async (subtaskId: string) => {
     if (!editTitleInput.trim()) return;
 
@@ -556,12 +572,15 @@ export default function TaskDetailPage() {
     if (error) {
       setErrorMsg('Gagal memperbarui tahapan: ' + error.message);
     } else {
+      // Kunci: Update timestamp task induk
+      await touchTaskUpdatedAt();
       setEditingSubtaskId(null);
       await loadTaskDetails();
     }
     setSavingSubtaskEdit(false);
   };
 
+  // UBAH PIC SUBTASK + UPDATE TIMESTAMP INDUK
   const handleUpdateSubtaskPic = async (subtaskId: string, targetPicId: string) => {
     try {
       await supabase.from('subtask_pics').delete().eq('subtask_id', subtaskId);
@@ -573,18 +592,21 @@ export default function TaskDetailPage() {
         });
       }
 
+      await touchTaskUpdatedAt();
       await loadTaskDetails();
     } catch (err: any) {
       setErrorMsg('Gagal memperbarui PIC tahapan: ' + err.message);
     }
   };
 
+  // HAPUS SUBTASK + UPDATE TIMESTAMP INDUK
   const handleDeleteSubtask = async (subtaskId: string) => {
     if (!confirm('Hapus tahapan pekerjaan ini?')) return;
     const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId);
     if (error) {
       setErrorMsg('Gagal menghapus subtask: ' + error.message);
     } else {
+      await touchTaskUpdatedAt();
       loadTaskDetails();
     }
   };
@@ -842,13 +864,11 @@ export default function TaskDetailPage() {
       <div className="bg-white dark:bg-[#131B26] p-6 md:p-8 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 dark:border-white/5 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            {/* TANGGAL TENGGAT REGULASI */}
             <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-[#DF3B68] text-white px-3 py-1 rounded-full shadow-2xs">
               <Calendar className="w-3.5 h-3.5 text-white/90" />
               <span>Batas Regulasi: {formattedDeadline}</span>
             </span>
 
-            {/* TANGGAL TENGGAT NILAI MAKSIMAL (JIKA DIKONFIGURASI) */}
             {formattedMaxScoreDeadline && (
               <span className="inline-flex items-center gap-1.5 text-xs font-mono font-bold bg-amber-500/10 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 px-3 py-1 rounded-full shadow-2xs">
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -861,6 +881,14 @@ export default function TaskDetailPage() {
             <span className="text-xs px-2.5 py-1 rounded-full font-semibold border bg-stone-50 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 border-stone-200 dark:border-white/10">
               Periode {task.period_type} {task.period_month ? `(Bulan ${task.period_month}/${task.period_year})` : ''}
             </span>
+
+            {/* Indikator Sinkronisasi Klerikal */}
+            {task.template_id && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 rounded-full shadow-2xs" title="Setiap perubahan tahapan sub-pekerjaan di sini otomatis menjadi acuan terbaru saat siklus periode berikutnya di-generate">
+                <RotateCw className="w-3 h-3 animate-spin-slow" />
+                <span>Master Siklus Klerikal Aktif</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
