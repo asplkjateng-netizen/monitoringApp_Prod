@@ -110,13 +110,13 @@ export async function GET(request: Request) {
   const todayStr = now.toISOString().split('T')[0];
 
   let generatedTasksCount = 0;
+  let generatedSubtasksCount = 0;
   let archivedTasksCount = 0;
   let purgedNotificationsCount = 0;
   let waMessagesSentCount = 0;
   let inAppAlertsSentCount = 0;
 
-  // 3. AUTO-GENERATE TUGAS PERIODIK: HANYA BERLAKU UNTUK KLERIKAL (is_recurring = true)
-  // Pekerjaan non-klerikal (is_recurring = false) atau INSIDENTIL mutlak diabaikan
+  // 3. AUTO-GENERATE TUGAS PERIODIK KLERIKAL (is_recurring = true) + DEEP CLONE SUB-KEGIATAN TERUPDATE
   if (currentDay === 1) {
     try {
       const eligiblePeriods: string[] = ['BULANAN'];
@@ -146,6 +146,7 @@ export async function GET(request: Request) {
             .maybeSingle();
 
           if (!existingTask) {
+            // Hitung Batas Regulasi
             const calculatedDeadline = computeCycleDeadline(
               tpl.period_type,
               tpl.deadline_rule,
@@ -153,6 +154,26 @@ export async function GET(request: Request) {
               now
             );
 
+            // Hitung Batas Nilai Maksimal (H-X)
+            let maxScoreDeadlineStr: string | null = null;
+            const daysBefore = tpl.max_score_days_before || 0;
+            if (daysBefore > 0) {
+              const d = new Date(calculatedDeadline);
+              d.setDate(d.getDate() - daysBefore);
+              maxScoreDeadlineStr = d.toISOString().split('T')[0];
+            }
+
+            // A. CARI PEKERJAAN SUMBER TERAKHIR UNTUK MENGAMBIL SUB-PEKERJAAN TERUPDATE
+            const { data: latestSourceTask } = await supabase
+              .from('tasks')
+              .select('id, updated_at')
+              .eq('template_id', tpl.id)
+              .eq('unit_id', tpl.created_by_unit)
+              .order('updated_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            // B. INSERT TUGAS BARU KE TABEL tasks
             const { data: newTask, error: insertError } = await supabase
               .from('tasks')
               .insert({
@@ -167,6 +188,8 @@ export async function GET(request: Request) {
                 period_month: currentMonth,
                 period_year: currentYear,
                 deadline: calculatedDeadline,
+                max_score_days_before: daysBefore,
+                max_score_deadline: maxScoreDeadlineStr,
                 critical_days_threshold: tpl.critical_days_threshold || 3,
                 status: 'BELUM_DIKERJAKAN',
                 progress_pct: 0,
@@ -176,8 +199,39 @@ export async function GET(request: Request) {
 
             if (!insertError && newTask) {
               generatedTasksCount++;
+
+              // C. REPLIKASI SEMUA SUB-KEGIATAN VERSI PALING MUTAKHIR
+              if (latestSourceTask?.id) {
+                const { data: sourceSubtasks } = await supabase
+                  .from('subtasks')
+                  .select('title, order_index, evidence_link_type')
+                  .eq('task_id', latestSourceTask.id)
+                  .order('order_index', { ascending: true })
+                  .order('created_at', { ascending: true });
+
+                if (sourceSubtasks && sourceSubtasks.length > 0) {
+                  const subtasksPayload = sourceSubtasks.map((st, idx) => ({
+                    task_id: newTask.id,
+                    title: st.title,
+                    is_completed: false,
+                    order_index: st.order_index ?? idx,
+                    evidence_link_type: st.evidence_link_type || 'INHERIT',
+                    custom_evidence_link: null,
+                  }));
+
+                  const { error: subtaskInsertErr } = await supabase
+                    .from('subtasks')
+                    .insert(subtasksPayload);
+
+                  if (!subtaskInsertErr) {
+                    generatedSubtasksCount += subtasksPayload.length;
+                  } else {
+                    console.error('Gagal insert subtasks cron:', subtaskInsertErr.message);
+                  }
+                }
+              }
               
-              // Notifikasi in-app kepada Pimpinan/Kasi unit terkait
+              // D. Notifikasi in-app kepada Pimpinan/Kasi unit terkait
               const { data: leaders } = await supabase
                 .from('profiles')
                 .select('id')
@@ -203,7 +257,7 @@ export async function GET(request: Request) {
     }
   }
 
-  // 4. [TAHAP IV] WHATSAPP DISPATCHER & IN-APP ALERT (MASA KRITIS H-X)
+  // 4. WHATSAPP DISPATCHER & IN-APP ALERT (MASA KRITIS H-X)
   try {
     const { data: activeTasks } = await supabase
       .from('tasks')
@@ -291,7 +345,6 @@ _Pesan ini dikirim otomatis oleh Gov-Task-Monitor._`;
             }
           }
 
-          // Kunci status wa_notified_at agar tidak terkirim ganda pada hari yang sama
           if (waSentForThisTask) {
             await supabase
               .from('tasks')
@@ -313,7 +366,7 @@ _Pesan ini dikirim otomatis oleh Gov-Task-Monitor._`;
       .from('tasks')
       .select(`
         id, unit_id, template_id, title, category, legal_basis, legal_basis_link, period_type, period_month,
-        period_year, deadline, completed_at, evidence_link, kendala_note,
+        period_year, deadline, max_score_deadline, completed_at, evidence_link, kendala_note,
         profiles:created_by (full_name),
         task_pics (profiles (id, full_name, nip)),
         subtasks (title, is_completed, custom_evidence_link)
@@ -347,6 +400,7 @@ _Pesan ini dikirim otomatis oleh Gov-Task-Monitor._`;
           period_month: t.period_month,
           period_year: t.period_year,
           deadline: t.deadline,
+          max_score_deadline: t.max_score_deadline || null,
           completed_at: t.completed_at,
           evidence_link: t.evidence_link,
           kendala_note: t.kendala_note,
@@ -385,6 +439,7 @@ _Pesan ini dikirim otomatis oleh Gov-Task-Monitor._`;
     timestamp: new Date().toISOString(),
     keep_alive_ping: pingData ? 'OK' : 'EMPTY',
     clerical_tasks_generated: generatedTasksCount,
+    clerical_subtasks_generated: generatedSubtasksCount,
     wa_notifications_dispatched: waMessagesSentCount,
     in_app_alerts_created: inAppAlertsSentCount,
     tasks_archived: archivedTasksCount,
