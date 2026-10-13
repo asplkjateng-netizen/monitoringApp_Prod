@@ -29,7 +29,9 @@ import {
   X,
   Edit2,
   Download,
-  RotateCw
+  RotateCw,
+  History,
+  UserCheck
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { TaskShareModal } from '@/components/tasks/task-share-modal';
@@ -52,6 +54,41 @@ interface DocSection {
   id: string;
   title: string;
   content: string;
+}
+
+interface ActivityItem {
+  id: string;
+  task_id: string;
+  user_id: string | null;
+  action_type: string;
+  description: string;
+  created_at: string;
+  profile?: {
+    full_name: string;
+    role: string;
+  } | null;
+}
+
+// FORMAT WAKTU RELATIF
+function formatRelativeTime(dateStr: string): string {
+  const now = new Date();
+  const d = new Date(dateStr);
+  const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+
+  if (diffSec < 60) return 'Baru saja';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} mnt lalu`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} jam lalu`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay} hari lalu`;
+
+  return d.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // KOMPONEN DAFTAR ISI INTERAKTIF (NOTION-STYLE HIDE & SHOW)
@@ -228,6 +265,8 @@ export default function TaskDetailPage() {
   const [subtasks, setSubtasks] = useState<any[]>([]);
   const [pics, setPics] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   // State Modal & Ekspor Gambar
@@ -267,6 +306,40 @@ export default function TaskDetailPage() {
     }
   }, [taskId]);
 
+  // Helper pencatat Linimasa Aktivitas (Audit Trail)
+  const logTaskActivity = async (actionType: string, description: string) => {
+    try {
+      const user = currentUser?.user;
+      const profile = currentUser?.profile;
+      const authorName = profile?.full_name || 'Pegawai';
+
+      const fullDesc = `${authorName} ${description}`;
+
+      await supabase.from('task_activities').insert({
+        task_id: taskId,
+        user_id: user?.id || null,
+        action_type: actionType,
+        description: fullDesc,
+      });
+
+      // Muat ulang daftar aktivitas secara realtime
+      loadActivities();
+    } catch (err: any) {
+      console.warn('Gagal mencatat log aktivitas:', err.message);
+    }
+  };
+
+  const loadActivities = async () => {
+    const { data } = await supabase
+      .from('task_activities')
+      .select('*, profile:profiles(full_name, role)')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (data) setActivities(data as any);
+  };
+
   // Helper untuk memperbarui timestamp tugas induk agar selalu terdeteksi sebagai versi paling mutakhir
   const touchTaskUpdatedAt = async () => {
     await supabase
@@ -278,6 +351,17 @@ export default function TaskDetailPage() {
   const loadTaskDetails = async () => {
     setLoading(true);
     setErrorMsg('');
+
+    // Ambil info auth user saat ini
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('id', user.id)
+        .single();
+      setCurrentUser({ user, profile: prof });
+    }
 
     const { data: taskData, error: taskError } = await supabase
       .from('tasks')
@@ -338,6 +422,9 @@ export default function TaskDetailPage() {
 
       if (staffData) setStaffList(staffData);
     }
+
+    // Muat Linimasa Audit
+    await loadActivities();
 
     setLoading(false);
   };
@@ -410,6 +497,7 @@ export default function TaskDetailPage() {
 
   const handleToggleSubtask = async (subtaskId: string, currentStatusVal: boolean) => {
     const nextVal = !currentStatusVal;
+    const targetSubtask = subtasks.find((s) => s.id === subtaskId);
 
     const updatedSubtasks = subtasks.map((s) =>
       s.id === subtaskId ? { ...s, is_completed: nextVal } : s
@@ -449,6 +537,13 @@ export default function TaskDetailPage() {
       })
       .eq('id', taskId);
 
+    // Catat Log Audit Linimasa
+    const actionVerb = nextVal ? 'mencentang selesai' : 'membatalkan centang';
+    await logTaskActivity(
+      nextVal ? 'CHECK_SUBTASK' : 'UNCHECK_SUBTASK',
+      `${actionVerb} tahapan: "${targetSubtask?.title || 'Sub-pekerjaan'}"`
+    );
+
     setCurrentStatus(nextStatus);
     setManualNotice('');
 
@@ -460,7 +555,6 @@ export default function TaskDetailPage() {
     await loadTaskDetails();
   };
 
-  // TAMBAH SUBTASK BARU + UPDATE TIMESTAMP INDUK
   const handleAddSubtask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubtaskTitle.trim()) return;
@@ -498,8 +592,13 @@ export default function TaskDetailPage() {
         });
       }
 
-      // Kunci: Pastikan task induk ter-update timestamp-nya
       await touchTaskUpdatedAt();
+
+      // Catat Log Audit Linimasa
+      await logTaskActivity(
+        'ADD_SUBTASK',
+        `menambahkan tahapan baru: "${newSubtaskTitle.trim()}"`
+      );
 
       setNewSubtaskTitle('');
       setNewSubtaskDeadline('');
@@ -509,7 +608,6 @@ export default function TaskDetailPage() {
     setAddingSubtask(false);
   };
 
-  // UBAH URUTAN SUBTASK (REORDER) + UPDATE TIMESTAMP INDUK
   const handleMoveSubtask = async (index: number, direction: 'UP' | 'DOWN') => {
     const targetIndex = direction === 'UP' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= subtasks.length) return;
@@ -530,8 +628,13 @@ export default function TaskDetailPage() {
         supabase.from('subtasks').update({ order_index: targetOrder }).eq('id', currentItem.id),
         supabase.from('subtasks').update({ order_index: currentOrder }).eq('id', targetItem.id),
       ]);
-      // Kunci: Update timestamp task induk
       await touchTaskUpdatedAt();
+
+      // Catat Log Audit Linimasa
+      await logTaskActivity(
+        'REORDER',
+        `memindahkan urutan tahapan "${currentItem.title}" (${direction === 'UP' ? 'naik' : 'turun'})`
+      );
     } catch (err: any) {
       setErrorMsg('Gagal memperbarui urutan tahapan: ' + err.message);
       loadTaskDetails();
@@ -550,7 +653,6 @@ export default function TaskDetailPage() {
     setEditDeadlineInput('');
   };
 
-  // SIMPAN EDIT TEXT / DEADLINE SUBTASK + UPDATE TIMESTAMP INDUK
   const saveEditSubtask = async (subtaskId: string) => {
     if (!editTitleInput.trim()) return;
 
@@ -572,16 +674,24 @@ export default function TaskDetailPage() {
     if (error) {
       setErrorMsg('Gagal memperbarui tahapan: ' + error.message);
     } else {
-      // Kunci: Update timestamp task induk
       await touchTaskUpdatedAt();
+
+      // Catat Log Audit Linimasa
+      await logTaskActivity(
+        'EDIT_SUBTASK',
+        `memperbarui uraian tahapan menjadi: "${editTitleInput.trim()}"`
+      );
+
       setEditingSubtaskId(null);
       await loadTaskDetails();
     }
     setSavingSubtaskEdit(false);
   };
 
-  // UBAH PIC SUBTASK + UPDATE TIMESTAMP INDUK
   const handleUpdateSubtaskPic = async (subtaskId: string, targetPicId: string) => {
+    const targetSubtask = subtasks.find((s) => s.id === subtaskId);
+    const targetStaff = staffList.find((s) => s.id === targetPicId);
+
     try {
       await supabase.from('subtask_pics').delete().eq('subtask_id', subtaskId);
 
@@ -593,20 +703,37 @@ export default function TaskDetailPage() {
       }
 
       await touchTaskUpdatedAt();
+
+      // Catat Log Audit Linimasa
+      await logTaskActivity(
+        'ASSIGN_PIC',
+        targetPicId
+          ? `menugaskan PIC "${targetStaff?.full_name}" pada tahapan "${targetSubtask?.title}"`
+          : `menghapus penugasan PIC pada tahapan "${targetSubtask?.title}"`
+      );
+
       await loadTaskDetails();
     } catch (err: any) {
       setErrorMsg('Gagal memperbarui PIC tahapan: ' + err.message);
     }
   };
 
-  // HAPUS SUBTASK + UPDATE TIMESTAMP INDUK
   const handleDeleteSubtask = async (subtaskId: string) => {
+    const targetSubtask = subtasks.find((s) => s.id === subtaskId);
     if (!confirm('Hapus tahapan pekerjaan ini?')) return;
+    
     const { error } = await supabase.from('subtasks').delete().eq('id', subtaskId);
     if (error) {
       setErrorMsg('Gagal menghapus subtask: ' + error.message);
     } else {
       await touchTaskUpdatedAt();
+
+      // Catat Log Audit Linimasa
+      await logTaskActivity(
+        'DELETE_SUBTASK',
+        `menghapus tahapan: "${targetSubtask?.title || 'Sub-pekerjaan'}"`
+      );
+
       loadTaskDetails();
     }
   };
@@ -628,6 +755,8 @@ export default function TaskDetailPage() {
     }
 
     const isNewlyTerkendala = currentStatus === 'TERKENDALA' && task.status !== 'TERKENDALA';
+    const statusChanged = currentStatus !== task.status;
+    const evidenceChanged = (evidenceLinkInput.trim() || null) !== (task.evidence_link || null);
 
     const { error } = await supabase
       .from('tasks')
@@ -646,6 +775,17 @@ export default function TaskDetailPage() {
     if (error) {
       setErrorMsg('Gagal menyimpan perubahan: ' + error.message);
     } else {
+      // Catat Log Audit Linimasa
+      if (statusChanged) {
+        await logTaskActivity('STATUS_CHANGE', `mengubah status tugas menjadi "${currentStatus}"`);
+      }
+      if (evidenceChanged) {
+        await logTaskActivity('UPLOAD_EVIDENCE', `memperbarui link bukti dukung penyelesaian`);
+      }
+      if (currentStatus === 'TERKENDALA' && kendalaInput.trim()) {
+        await logTaskActivity('REPORT_ISSUE', `melaporkan kendala: "${kendalaInput.trim()}"`);
+      }
+
       if (isNewlyTerkendala) {
         try {
           const { data: leaders } = await supabase
@@ -674,7 +814,7 @@ export default function TaskDetailPage() {
         }
       }
 
-      setSuccessMsg(`Status dan tanggal tenggat tugas berhasil diperbarui!`);
+      setSuccessMsg(`Status dan data tugas berhasil diperbarui!`);
       setManualNotice('');
       setTimeout(() => setSuccessMsg(''), 4000);
       loadTaskDetails();
@@ -882,7 +1022,6 @@ export default function TaskDetailPage() {
               Periode {task.period_type} {task.period_month ? `(Bulan ${task.period_month}/${task.period_year})` : ''}
             </span>
 
-            {/* Indikator Sinkronisasi Klerikal */}
             {task.template_id && (
               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 rounded-full shadow-2xs" title="Setiap perubahan tahapan sub-pekerjaan di sini otomatis menjadi acuan terbaru saat siklus periode berikutnya di-generate">
                 <RotateCw className="w-3 h-3 animate-spin-slow" />
@@ -1024,205 +1163,246 @@ export default function TaskDetailPage() {
 
       {/* Subtasks (Kiri) & Kontrol Cepat (Kanan) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Kolom Subtasks */}
-        <div className="md:col-span-2 bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
-          <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/5 pb-3">
-            <div>
-              <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan, Urutan & PIC</h2>
-              <p className="text-xs text-stone-500 dark:text-slate-400">
-                Gunakan panah ▲ / ▼ untuk menata urutan atau ubah data tahapan secara inline.
-              </p>
-            </div>
-            <span className="text-xs font-semibold text-stone-500 dark:text-slate-300 bg-stone-100 dark:bg-[#1A2332] px-2.5 py-1 rounded-full border border-stone-200 dark:border-white/10">
-              {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
-            </span>
-          </div>
-
-          {/* Form Tambah Subtask Baru */}
-          <form onSubmit={handleAddSubtask} className="flex flex-col gap-2 p-3 bg-stone-50 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="Ketik uraian tahapan sub-pekerjaan baru..."
-                value={newSubtaskTitle}
-                onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                className="flex-1 px-3 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={newSubtaskPicId}
-                onChange={(e) => setNewSubtaskPicId(e.target.value)}
-                className="flex-1 min-w-[160px] px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-700 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10"
-              >
-                <option value="">-- Tanpa PIC (Kosong) --</option>
-                {staffList.map((staff) => (
-                  <option key={staff.id} value={staff.id}>
-                    {staff.full_name} ({staff.role})
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="date"
-                max={currentDeadline || undefined}
-                value={newSubtaskDeadline}
-                onChange={(e) => setNewSubtaskDeadline(e.target.value)}
-                className="px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10 font-mono"
-                title="Batas waktu tahapan (opsional)"
-              />
-
-              <button
-                type="submit"
-                disabled={addingSubtask || !newSubtaskTitle.trim()}
-                className="px-4 py-2 bg-stone-900 dark:bg-[#DF3B68] text-white rounded-xl hover:bg-stone-800 dark:hover:bg-[#C72F58] disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
-              >
-                {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                Tambah
-              </button>
-            </div>
-          </form>
-
-          {/* List Subtasks */}
-          <div className="divide-y divide-stone-100 dark:divide-white/5 pt-1">
-            {subtasks.length === 0 ? (
-              <div className="py-8 text-center text-xs text-stone-400 dark:text-slate-500">
-                Belum ada tahapan sub-pekerjaan. Tambahkan tahapan pada formulir di atas.
+        {/* Kolom Subtasks & Linimasa Audit */}
+        <div className="md:col-span-2 space-y-6">
+          <div className="bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/5 pb-3">
+              <div>
+                <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Checklist Sub-pekerjaan, Urutan & PIC</h2>
+                <p className="text-xs text-stone-500 dark:text-slate-400">
+                  Gunakan panah ▲ / ▼ untuk menata urutan atau ubah data tahapan secara inline.
+                </p>
               </div>
-            ) : (
-              subtasks.map((st, idx) => {
-                const isEditing = editingSubtaskId === st.id;
-                const currentSubPicId = (st.subtask_pics && st.subtask_pics.length > 0)
-                  ? st.subtask_pics[0]?.user_id
-                  : '';
+              <span className="text-xs font-semibold text-stone-500 dark:text-slate-300 bg-stone-100 dark:bg-[#1A2332] px-2.5 py-1 rounded-full border border-stone-200 dark:border-white/10">
+                {subtasks.filter(s => s.is_completed).length} / {subtasks.length} Selesai
+              </span>
+            </div>
 
-                return (
-                  <div key={st.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <div className="flex flex-col shrink-0">
-                        <button
-                          type="button"
-                          disabled={idx === 0}
-                          onClick={() => handleMoveSubtask(idx, 'UP')}
-                          className="p-0.5 text-stone-400 hover:text-[#DF3B68] disabled:opacity-20 transition-colors"
-                          title="Pindahkan ke atas"
-                        >
-                          <ArrowUp className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={idx === subtasks.length - 1}
-                          onClick={() => handleMoveSubtask(idx, 'DOWN')}
-                          className="p-0.5 text-stone-400 hover:text-[#DF3B68] disabled:opacity-20 transition-colors"
-                          title="Pindahkan ke bawah"
-                        >
-                          <ArrowDown className="w-3 h-3" />
-                        </button>
+            {/* Form Tambah Subtask Baru */}
+            <form onSubmit={handleAddSubtask} className="flex flex-col gap-2 p-3 bg-stone-50 dark:bg-[#0E1520] rounded-2xl border border-stone-200 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Ketik uraian tahapan sub-pekerjaan baru..."
+                  value={newSubtaskTitle}
+                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 rounded-xl border border-stone-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-[#DF3B68]/30"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={newSubtaskPicId}
+                  onChange={(e) => setNewSubtaskPicId(e.target.value)}
+                  className="flex-1 min-w-[160px] px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-700 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10"
+                >
+                  <option value="">-- Tanpa PIC (Kosong) --</option>
+                  {staffList.map((staff) => (
+                    <option key={staff.id} value={staff.id}>
+                      {staff.full_name} ({staff.role})
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="date"
+                  max={currentDeadline || undefined}
+                  value={newSubtaskDeadline}
+                  onChange={(e) => setNewSubtaskDeadline(e.target.value)}
+                  className="px-2.5 py-2 text-xs bg-white dark:bg-[#1A2332] text-stone-800 dark:text-slate-200 rounded-xl border border-stone-200 dark:border-white/10 font-mono"
+                  title="Batas waktu tahapan (opsional)"
+                />
+
+                <button
+                  type="submit"
+                  disabled={addingSubtask || !newSubtaskTitle.trim()}
+                  className="px-4 py-2 bg-stone-900 dark:bg-[#DF3B68] text-white rounded-xl hover:bg-stone-800 dark:hover:bg-[#C72F58] disabled:opacity-50 transition-colors text-xs font-semibold flex items-center gap-1 shadow-2xs"
+                >
+                  {addingSubtask ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Tambah
+                </button>
+              </div>
+            </form>
+
+            {/* List Subtasks */}
+            <div className="divide-y divide-stone-100 dark:divide-white/5 pt-1">
+              {subtasks.length === 0 ? (
+                <div className="py-8 text-center text-xs text-stone-400 dark:text-slate-500">
+                  Belum ada tahapan sub-pekerjaan. Tambahkan tahapan pada formulir di atas.
+                </div>
+              ) : (
+                subtasks.map((st, idx) => {
+                  const isEditing = editingSubtaskId === st.id;
+                  const currentSubPicId = (st.subtask_pics && st.subtask_pics.length > 0)
+                    ? st.subtask_pics[0]?.user_id
+                    : '';
+
+                  return (
+                    <div key={st.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 group">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="flex flex-col shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => handleMoveSubtask(idx, 'UP')}
+                            className="p-0.5 text-stone-400 hover:text-[#DF3B68] disabled:opacity-20 transition-colors"
+                            title="Pindahkan ke atas"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === subtasks.length - 1}
+                            onClick={() => handleMoveSubtask(idx, 'DOWN')}
+                            className="p-0.5 text-stone-400 hover:text-[#DF3B68] disabled:opacity-20 transition-colors"
+                            title="Pindahkan ke bawah"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {isEditing ? (
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
+                            <input
+                              type="text"
+                              value={editTitleInput}
+                              onChange={(e) => setEditTitleInput(e.target.value)}
+                              className="flex-1 px-2.5 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-medium"
+                            />
+                            <input
+                              type="date"
+                              max={currentDeadline || undefined}
+                              value={editDeadlineInput}
+                              onChange={(e) => setEditDeadlineInput(e.target.value)}
+                              className="px-2 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-mono"
+                            />
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => saveEditSubtask(st.id)}
+                                disabled={savingSubtaskEdit}
+                                className="p-1.5 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 rounded-lg hover:bg-emerald-100"
+                                title="Simpan"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEditSubtask}
+                                className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg"
+                                title="Batal"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <label className="flex items-center gap-2.5 cursor-pointer flex-1 select-none min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={st.is_completed}
+                              onChange={() => handleToggleSubtask(st.id, st.is_completed)}
+                              className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-600 cursor-pointer shrink-0"
+                            />
+                            <span className={`text-xs md:text-sm truncate ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
+                              {idx + 1}. {st.title}
+                            </span>
+                          </label>
+                        )}
                       </div>
 
-                      {isEditing ? (
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
-                          <input
-                            type="text"
-                            value={editTitleInput}
-                            onChange={(e) => setEditTitleInput(e.target.value)}
-                            className="flex-1 px-2.5 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-medium"
-                          />
-                          <input
-                            type="date"
-                            max={currentDeadline || undefined}
-                            value={editDeadlineInput}
-                            onChange={(e) => setEditDeadlineInput(e.target.value)}
-                            className="px-2 py-1 text-xs border border-stone-300 dark:border-white/20 rounded-lg bg-white dark:bg-[#1A2332] text-stone-900 dark:text-slate-100 font-mono"
-                          />
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => saveEditSubtask(st.id)}
-                              disabled={savingSubtaskEdit}
-                              className="p-1.5 text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 rounded-lg hover:bg-emerald-100"
-                              title="Simpan"
+                      {!isEditing && (
+                        <div className="flex items-center gap-2 pl-7 sm:pl-0 shrink-0">
+                          <div className="relative">
+                            <select
+                              value={currentSubPicId}
+                              onChange={(e) => handleUpdateSubtaskPic(st.id, e.target.value)}
+                              className="text-[11px] font-semibold py-1 px-2 pr-6 rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 max-w-[130px] truncate"
+                              title="Ubah PIC tahapan"
                             >
-                              <Check className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={cancelEditSubtask}
-                              className="p-1.5 text-stone-400 hover:text-rose-600 rounded-lg"
-                              title="Batal"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
+                              <option value="">-- Tanpa PIC --</option>
+                              {staffList.map((staff) => (
+                                <option key={staff.id} value={staff.id}>
+                                  {staff.full_name}
+                                </option>
+                              ))}
+                            </select>
                           </div>
+
+                          {st.deadline && (
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-white/10">
+                              Batas: {st.deadline}
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => startEditSubtask(st)}
+                            className="p-1 text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                            title="Edit tahapan"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSubtask(st.id)}
+                            className="p-1 text-stone-400 hover:text-rose-600 transition-colors"
+                            title="Hapus tahapan"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      ) : (
-                        <label className="flex items-center gap-2.5 cursor-pointer flex-1 select-none min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={st.is_completed}
-                            onChange={() => handleToggleSubtask(st.id, st.is_completed)}
-                            className="w-4 h-4 rounded text-[#DF3B68] focus:ring-[#DF3B68] border-stone-300 dark:border-slate-600 cursor-pointer shrink-0"
-                          />
-                          <span className={`text-xs md:text-sm truncate ${st.is_completed ? 'line-through text-stone-400 dark:text-slate-500 font-normal' : 'text-stone-800 dark:text-slate-200 font-medium'}`}>
-                            {idx + 1}. {st.title}
-                          </span>
-                        </label>
                       )}
                     </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-                    {!isEditing && (
-                      <div className="flex items-center gap-2 pl-7 sm:pl-0 shrink-0">
-                        <div className="relative">
-                          <select
-                            value={currentSubPicId}
-                            onChange={(e) => handleUpdateSubtaskPic(st.id, e.target.value)}
-                            className="text-[11px] font-semibold py-1 px-2 pr-6 rounded-lg border border-stone-200 dark:border-white/10 bg-stone-50 dark:bg-[#1A2332] text-stone-700 dark:text-slate-300 max-w-[130px] truncate"
-                            title="Ubah PIC tahapan"
-                          >
-                            <option value="">-- Tanpa PIC --</option>
-                            {staffList.map((staff) => (
-                              <option key={staff.id} value={staff.id}>
-                                {staff.full_name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+          {/* WIDGET LINIMASA AKTIVITAS & AUDIT TRAIL (ROADMAP PRIORITAS 1) */}
+          <div className="bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 transition-colors">
+            <div className="flex items-center justify-between border-b border-stone-100 dark:border-white/5 pb-3">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-[#DF3B68] dark:text-rose-400" />
+                <h3 className="font-bold text-stone-900 dark:text-slate-100 text-sm md:text-base">
+                  Linimasa Aktivitas & Jejak Audit Kinerja
+                </h3>
+              </div>
+              <span className="text-[11px] font-semibold text-stone-400 dark:text-slate-500">
+                {activities.length} aktivitas tercatat
+              </span>
+            </div>
 
-                        {st.deadline && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-stone-100 dark:bg-[#1A2332] text-stone-600 dark:text-slate-300 border border-stone-200 dark:border-white/10">
-                            Batas: {st.deadline}
-                          </span>
-                        )}
+            {activities.length === 0 ? (
+              <div className="py-6 text-center text-xs text-stone-400 dark:text-slate-500">
+                Belum ada aktivitas mutasi yang tercatat pada tugas ini.
+              </div>
+            ) : (
+              <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-stone-200 dark:before:bg-white/10">
+                {activities.map((act) => (
+                  <div key={act.id} className="relative group text-xs">
+                    {/* Titik Linimasa */}
+                    <div className="absolute -left-6 top-1 w-2.5 h-2.5 rounded-full bg-[#DF3B68] ring-4 ring-white dark:ring-[#131B26]" />
 
-                        <button
-                          type="button"
-                          onClick={() => startEditSubtask(st)}
-                          className="p-1 text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                          title="Edit tahapan"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteSubtask(st.id)}
-                          className="p-1 text-stone-400 hover:text-rose-600 transition-colors"
-                          title="Hapus tahapan"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
+                      <p className="text-stone-800 dark:text-slate-200 leading-relaxed font-medium">
+                        {act.description}
+                      </p>
+                      <span className="text-[10px] font-mono text-stone-400 dark:text-slate-500 shrink-0">
+                        {formatRelativeTime(act.created_at)}
+                      </span>
+                    </div>
                   </div>
-                );
-              })
+                ))}
+              </div>
             )}
           </div>
         </div>
 
         {/* Kolom Kontrol Status & Bukti */}
-        <div className="bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 flex flex-col justify-between transition-colors">
+        <div className="bg-white dark:bg-[#131B26] p-6 rounded-3xl border border-stone-200/80 dark:border-white/10 shadow-sm space-y-4 flex flex-col justify-between transition-colors self-start">
           <div className="space-y-4">
             <h2 className="font-bold text-stone-900 dark:text-slate-100 text-base">Status & Validasi Bukti</h2>
 
