@@ -21,8 +21,7 @@ import {
   Layers,
   Calendar,
   Power,
-  PowerOff,
-  Filter
+  PowerOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +41,7 @@ interface TemplateItem {
   exact_day?: number | null;
   critical_days_threshold?: number;
   is_recurring?: boolean;
+  max_score_days_before?: number;
   created_by_unit: string;
   created_at: string;
   unit?: {
@@ -97,7 +97,6 @@ export default function TusiCatalogPage() {
       'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
     ];
 
-    // Siklus berikutnya (Tanggal 1 bulan depan)
     const nextMonth = month === 12 ? 1 : month + 1;
     const nextYear = month === 12 ? year + 1 : year;
     const nextRunStr = `1 ${monthNames[nextMonth - 1]} ${nextYear}`;
@@ -179,7 +178,6 @@ export default function TusiCatalogPage() {
     return currentUserProfile.unit_id === template.created_by_unit;
   };
 
-  // Toggle Cepat Status Klerikal / Auto-Cycle (Aktifkan / Hentikan)
   const handleToggleRecurring = async (template: TemplateItem) => {
     const newStatus = !(template.is_recurring ?? (template.period_type !== 'INSIDENTIL'));
     setTogglingId(template.id);
@@ -261,7 +259,6 @@ export default function TusiCatalogPage() {
     }
   };
 
-  // Hapus Master Tusi Klerikal Permanen
   const handleDeleteTemplate = async (templateId: string, title: string) => {
     const confirmed = window.confirm(
       `HAPUS MASTER PEKERJAAN KLERIKAL?\n\n"${title}"\n\nAkibat penghapusan:\n1. Master pekerjaan ini dihapus dari Bank Tusi.\n2. Sistem TIDAK AKAN PERNAH men-generate tugas ini lagi pada siklus-siklus mendatang.\n\nApakah Anda yakin ingin melanjutkan?`
@@ -377,6 +374,7 @@ export default function TusiCatalogPage() {
     return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(finalDay).padStart(2, '0')}`;
   };
 
+  // GENERATOR & ADOPSI TUGAS DENGAN DEEP CLONE SUB-PEKERJAAN TERUPDATE
   const handleCloneTask = async (template: TemplateItem) => {
     setCloningId(template.id);
     const { data: { user } } = await supabase.auth.getUser();
@@ -390,6 +388,15 @@ export default function TusiCatalogPage() {
     const now = new Date();
     const deadlineStr = calculateDeadlineForClone(template);
 
+    // Hitung Batas Waktu Nilai Maksimal (H-X) jika diatur pada template
+    let maxScoreDeadlineStr: string | null = null;
+    const daysBefore = template.max_score_days_before || 0;
+    if (daysBefore > 0) {
+      const d = new Date(deadlineStr);
+      d.setDate(d.getDate() - daysBefore);
+      maxScoreDeadlineStr = d.toISOString().split('T')[0];
+    }
+
     let periodMonth = now.getMonth() + 1;
     if (template.period_type === 'TRIWULANAN') {
       periodMonth = Math.ceil(periodMonth / 3) * 3;
@@ -399,6 +406,32 @@ export default function TusiCatalogPage() {
       periodMonth = 12;
     }
 
+    // 1. CARI TUGAS SUMBER TERAKHIR (VERSI PALING MUTAKHIR DENGAN SUBTASK)
+    // Prioritas 1: Tugas terakhir di unit sendiri
+    const { data: latestUnitTask } = await supabase
+      .from('tasks')
+      .select('id, updated_at')
+      .eq('template_id', template.id)
+      .eq('unit_id', currentUserProfile.unit_id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let sourceTaskId = latestUnitTask?.id;
+
+    // Prioritas 2: Jika belum pernah dibuat di unit sendiri, cari dari unit lain/pembuat template
+    if (!sourceTaskId) {
+      const { data: latestAnyTask } = await supabase
+        .from('tasks')
+        .select('id, updated_at')
+        .eq('template_id', template.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      sourceTaskId = latestAnyTask?.id;
+    }
+
+    // 2. INSERT TUGAS UTAMA KE TABEL tasks
     const { data: newTask, error: taskError } = await supabase
       .from('tasks')
       .insert({
@@ -412,6 +445,8 @@ export default function TusiCatalogPage() {
         period_month: periodMonth,
         period_year: now.getFullYear(),
         deadline: deadlineStr,
+        max_score_days_before: daysBefore,
+        max_score_deadline: maxScoreDeadlineStr,
         critical_days_threshold: template.critical_days_threshold || 3,
         status: 'BELUM_DIKERJAKAN',
         progress_pct: 0,
@@ -426,19 +461,53 @@ export default function TusiCatalogPage() {
       return;
     }
 
+    // 3. ASSIGN PIC UTAMA KE PEKERJAAN BARU
     await supabase.from('task_pics').insert({
       task_id: newTask.id,
       user_id: user.id,
     });
 
+    // 4. DUPLIKASI SELURUH SUB-PEKERJAAN VERSI TERUPDATE (DEEP CLONE)
+    let copiedSubtaskCount = 0;
+    if (sourceTaskId) {
+      const { data: sourceSubtasks } = await supabase
+        .from('subtasks')
+        .select('title, order_index, evidence_link_type')
+        .eq('task_id', sourceTaskId)
+        .order('order_index', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      if (sourceSubtasks && sourceSubtasks.length > 0) {
+        const subtasksPayload = sourceSubtasks.map((st, idx) => ({
+          task_id: newTask.id,
+          title: st.title,
+          is_completed: false,
+          order_index: st.order_index ?? idx,
+          evidence_link_type: st.evidence_link_type || 'INHERIT',
+          custom_evidence_link: null,
+        }));
+
+        const { error: subtaskError } = await supabase
+          .from('subtasks')
+          .insert(subtasksPayload);
+
+        if (subtaskError) {
+          console.error('Peringatan: Gagal menyalin sub-pekerjaan:', subtaskError.message);
+        } else {
+          copiedSubtaskCount = subtasksPayload.length;
+        }
+      }
+    }
+
     setCloningId(null);
     setSuccessMsg(
-      `Tusi "${template.title}" berhasil diadopsi ke unit Anda dan terbit di daftar tugas aktif!`
+      copiedSubtaskCount > 0
+        ? `Tusi "${template.title}" berhasil diadopsi bersama ${copiedSubtaskCount} tahapan sub-pekerjaan versi terbaru!`
+        : `Tusi "${template.title}" berhasil diadopsi ke unit Anda dan terbit di daftar tugas aktif!`
     );
     setTimeout(() => setSuccessMsg(''), 4500);
   };
 
-  // Perhitungan Jumlah Template Klerikal Aktif vs Nonaktif
   const recurringStats = useMemo(() => {
     let activeRecurring = 0;
     let pausedRecurring = 0;
@@ -469,14 +538,12 @@ export default function TusiCatalogPage() {
 
     if (!matchSearch) return false;
 
-    // Filter berdasarkan Satker / Tusi
     if (!isSuperAdmin) {
       if (t.tusi_type?.toUpperCase() !== userTusiType.toUpperCase()) return false;
     } else if (selectedTusi !== 'ALL' && t.tusi_type?.toUpperCase() !== selectedTusi.toUpperCase()) {
       return false;
     }
 
-    // Filter berdasarkan Kategori Tab Klerikal
     const isClerical = t.period_type !== 'INSIDENTIL';
     const isRec = t.is_recurring ?? isClerical;
 
@@ -645,7 +712,6 @@ export default function TusiCatalogPage() {
           </button>
         </div>
 
-        {/* Indikator Unit Pengguna */}
         <div className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-white/60 self-end sm:self-center pr-2">
           <Sparkles className="w-3.5 h-3.5 text-[#DF3B68]" />
           <span>Seksi: <strong>{userTusiType}</strong></span>
@@ -743,7 +809,6 @@ export default function TusiCatalogPage() {
 
                     {hasManageAccess && (
                       <div className="flex items-center gap-1">
-                        {/* Tombol Cepat Sakelar Siklus Klerikal */}
                         {isClerical && (
                           <button
                             type="button"
